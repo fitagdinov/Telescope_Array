@@ -1,0 +1,346 @@
+\scrollmode
+\documentstyle[11pt]{article}
+\pagestyle{empty}
+\textwidth 6.5in
+\textheight 8.0in
+\oddsidemargin 0in
+\evensidemargin 0in
+\topmargin 0in
+\begin{document}
+\title{Bank Writing documentation ver 1.3}
+\author{Matthew J. Kidd}
+\date{Jan 30, 1997}
+\maketitle
+\tableofcontents
+
+\section{Purpose}
+
+Descibes how to write, test, and install a new DST bank.
+
+\section{Assumptions}
+
+Throughout it is assumed you are working out of a single directory.
+It does not matter where.
+
+\smallskip
+\noindent
+It is assumed through that you have the following definitions in
+your {\it \verb+~+/.cshrc} file:
+
+\begin{verbatim}
+    set dstinc = '/hires_soft/dst95/inc'
+    set dstsrc = '/hires_soft/dst95/src'
+    set dstuvm = '/hires_soft/dst95/uvm'
+    set dstlib = '/hires_soft/dst95/lib'
+\end{verbatim}
+
+You can test whether these are defined, with a command such as:
+{\bf echo \$dstinc}. If you do not have/\-add these, simply substitute
+the appropriate definition every time. ksh users can use {\bf EXPORT}
+to set these up.
+
+It is further assumed that the bank being written is called NEWB.
+References to NEWB below, should be substituted with the name of
+your bank.
+
+Finally, it is assumed the bank author has available a program to fill
+the new bank. This may be a short program specifically written for this
+purpose or be part of a more complex analysis program. This program will
+be referred to as {\it fill.c} below.
+
+
+\section{Preliminaries}
+
+Pick a bank name and bankid. There are some established conventions
+for bankids. These are:
+
+\begin{itemize}
+
+\item{10000 series} Hires1 only banks
+\item{20000 series} Hires2 only banks
+\item{30000 series} Banks that can handle hires1 and hires2 information.
+\item{40000 series} CASA/MIA merge related banks
+\item{90000 series} Fly's Eye II merge related banks
+\item{X2XXX series} FADC equivalents for various banks
+
+\end{itemize}
+
+Consult the group writeable file 
+{\it /hires\-\_soft\-/dst95\-/doc\-/bankid.doc} for a list of bankids
+already in use. This file also describes the conventions for bankids 
+described above. Update this file after picking a bank name and bankid.
+
+
+\section{Writing the {\it newb\_dst.h} file}
+
+Copy the header template {\it /hires\_\-soft/\-dst95/\-doc/\-xxxx\_dst.h}
+to your area. Then rename the file:
+
+\begin{verbatim}
+    cp $dstdoc/xxxx_dst.h .
+    mv xxxx_dst.h newb_dst.h    
+\end{verbatim}
+
+\noindent 
+Edit this file, following the instructions contained therein. It
+may be helpful to also study existing header files.
+
+
+
+\section{Writing the {\it newb\_dst.c} file}
+
+Copy the header template {\it /hires\_\-soft/\-dst95/\-doc/\-xxxx\_dst.c}
+to your area. Then rename the file:
+
+\begin{verbatim}
+    cp $dstdoc/xxxx_dst.c .
+    mv xxxx_dst.c newb_dst.c
+\end{verbatim}
+
+\noindent
+Edit this file, following the instructions contained therein. It
+may be helpful to also study existing pack/unpack routines.
+
+
+\section{Testing the bank}
+
+\subsection{Compilation and Lint checking}
+
+The following method will allow you to test your new bank code without
+affecting any other code until you believe it works well:
+
+\smallskip
+\noindent
+First, see if your code even compiles:
+
+\begin{verbatim}
+    cc -c -I$dstinc newb_dst.c
+\end{verbatim}
+
+\noindent Note: even if you are later changing existing newb\_dst.c
+pack/\-unpack code, the header file {\it newb\_dst.h} in your working
+directory will override the header file that already exists in the dst 
+include area, \$dstinc.
+
+\smallskip
+\noindent
+Second, check if your code passes {\bf lint}. {\bf lint} is a C program
+checker that flags down many problems and undesirable situations not
+caught by the compiler.
+
+\begin{verbatim}
+    lint -u -x -I$dstinc newb_dst.c
+\end{verbatim}
+
+\noindent
+{\bf lint} can be a little too demanding. In particular, one of the 
+following messages will probably be seen:
+
+\begin{verbatim}
+  function returns value which is always ignored     <--- Decstations
+      fprintf     
+
+  ``stdio.h'', line 921 (``llib-lc.c''): warning: function 
+   fprintf return value is always ignored            <--- Alphas
+\end{verbatim}
+
+\noindent
+These occur because {\bf fprintf} returns a status value which is
+ignored in the bank dump routine. Since we are not writing kernel
+code, it is reasonable to ignore this.
+
+
+\subsection{But does it work?}
+
+Presumably the program now compiles and passes {\bf lint}. However,
+it is possible that not everything is packed and unpacked correctly.
+It is necessary to pack the bank a few times and check what comes
+out with {\bf dstdump}.
+
+Furthermore, your ascii dump routine will probably not look very
+good immediately after the first successful compile. A good looking 
+dump is ususally an iterative process.
+
+Ultimately several programs must be updated to ``hook'' the new
+bank into existing routines. During the testing phase, fetch
+your own copies of these programs and make personal modifications.
+
+\begin{verbatim} 
+    uvma f $dstuvm/uti/event.h
+    uvma f $dstuvm/uti/event.c
+    uvma f $dstuvm/fetch/fetch1evt_dst_.c
+    uvma f $dstuvm/fetch/write1evt_dst_.c
+    uvma f $dstuvm/pro/dstdump.c
+    chmod 644 write1evt_dst_.c fetch1evt_dst_.c event.c event.h dstdump.c
+\end{verbatim}
+
+\noindent
+The first four require slight modification:
+
+\begin{itemize}
+
+\item{\it event.h} Add a line (in correct alphabetical location):
+
+   \begin{verbatim} 
+    #include ``newb_dst.h''
+   \end{verbatim}
+
+\item{\it event.c} Add a line (in correct alphabetical location):
+
+   \begin{verbatim} 
+  {"newb",   NEWB_BANKID,   sizeof(newb_),
+     newb_bank_to_common_, newb_common_to_dst_, newb_common_to_dumpf_, 1}   
+   \end{verbatim}
+
+\item{\it fetch1evt\_dst\_.c} Add a line
+
+   \begin{verbatim} 
+    #include ``newb_dst.h''
+   \end{verbatim}
+
+Also add a new case. The parallels with existing code should be clear.
+
+\item{\it write1evt\_dst\_.c} Add a line
+
+   \begin{verbatim} 
+    #include ``newb_dst.h''
+   \end{verbatim}
+
+Also add a new case. The parallels with existing code should be clear.
+
+\end{itemize}
+
+\smallskip
+\noindent
+Create object files for these routines:
+
+\begin{verbatim} 
+    cc -c -I$dstinc event.c
+    cc -c -I$dstinc fetch1evt_dst_.c
+    cc -c -I$dstinc write1evt_dst_.c
+    cc -c -I$dstinc dstdump.c
+\end{verbatim}
+
+\smallskip
+\noindent
+Now create executables, which incorporate NEWB, for your fill 
+routine and the dstdump program.
+
+\begin{verbatim} 
+    clink -a fill.o newb_dst.o event.o write1evt_dst_.o fetch1evt_dst_.o
+    clink -a dstdump.o newb_dst.o event.o
+\end{verbatim}
+
+Although, {\it event.o}, {\it write1evt\_dst\_.o}, and 
+{\it fetch1evt\_dst\_.o}, already exist in the libraries searched by
+{\bf clink}, your updated working directory copies will take precedence.
+
+Run {\bf fill} and check the output with {\bf ./dstdump}. If there are
+problems, edit {\it newb\_dst.h} and {\it newb\_dst.c} as necessary.
+Create a new object file, {\it newb\_dst.o} and relink {\bf fill} and
+{\bf dstdump}:
+
+\begin{verbatim} 
+    cc -c -I$dstinc newb_dst.c
+    clink -a fill.o newb_dst.o event.o write1evt_dst_.o fetch1evt_dst_.o
+    clink -a dstdump.o newb_dst.o event.o
+\end{verbatim}
+
+\noindent
+Repeat until everything is perfect.
+
+
+\section{Installing the bank}
+
+Everything can be quickly installed now, with a minimum of hassle
+or disruption.
+
+\smallskip
+\noindent
+First reserve the programs which before were only fetched:
+
+\begin{verbatim} 
+    uvma res $dstuvm/uti/event.h
+    uvma res $dstuvm/uti/event.c
+    uvma res $dstuvm/fetch/fetch1evt_dst_.c
+    uvma res $dstuvm/fetch/write1evt_dst_.c
+\end{verbatim}
+
+Alter {\it event.h}, {\it event.c}, {\it fetch1evt\_dst\_.c}, and
+{\it write1evt\_dst\_.c} as in the previous section. There is no need 
+to alter {\it dstdump.c}. 
+
+Create object files from these as before. Create the {\bf fill} and
+{\bf dstdump} executables as before. Everything should still work. 
+This is testing that you have modified {\it event.h}, {\it event.c},
+{\it fetch1evt\_dst\_.c}, and {\it write1evt\_dst\_.c} correctly.
+They may have been altered since you first fetched copies of them.
+
+If everything is working fine, replace the updated library elements:
+
+\begin{verbatim} 
+    uvma rep $dstuvm/uti/event.h
+    uvma rep $dstuvm/uti/event.c
+    uvma rep $dstuvm/fetch/fetch1evt_dst_.c
+    uvma rep $dstuvm/fetch/write1evt_dst_.c
+\end{verbatim}
+
+\noindent
+Finally, create new libraries elements for the new bank:
+
+\begin{verbatim} 
+    uvma c e $dstuvm/bank/newb_dst.h
+    uvma c e $dstuvm/bank/newb_dst.c
+\end{verbatim}
+
+
+
+\section{Writing the {\it newb\_dst.inc} file}
+
+
+After all the hassle above, writing the fortran {\it .inc} file
+will be trivial. A look at existing banks is helpful.
+
+\smallskip
+\noindent
+The basic rules are:
+
+\begin{enumerate}
+
+\item \#DEFINE NEWB\_WHATEVER val becomes parameter(NEWB\_WHATEVER=val)
+\item The C functions are declared external and their return
+   type is specified.
+\item The common block is written in the same order as the
+   header file. There is no period between newb\_ and the
+   variable name.
+\item Variables are declared. {\bf Array indices must be 
+   swapped left to right}.
+
+\end{enumerate}
+
+
+Todd Vanderveen and I have written a PERL script which makes a 
+reasonable first attempt at automatic .h $\rightarrow$ .inc 
+conversion for bank header files.
+
+\medskip
+\noindent
+Simply type:
+
+\begin{verbatim}
+   dst_bank_h2inc.perl xxxx_dst.h
+\end{verbatim}
+
+This will create an output file called {\it xxxx\_dst.inc} in the 
+current directory. Although the program handles most common cases 
+well and will often produce completely working code, the result 
+should still be checked carefully and edited as necessary. Lines 
+which begin: ``WARNING: can't handle:'' definitely require corrective
+action.
+
+Finally, the file {\it \$dstuvm/uti/event.inc} should be updated
+by adding ``include xxxx\_dst.inc'' in the obvious place.
+
+\end{document}
+
+

@@ -1,0 +1,59 @@
+K 25
+svn:wc:ra_dav:version-url
+V 78
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib
+END
+dst_sort.c
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/dst_sort.c
+END
+event.c
+K 25
+svn:wc:ra_dav:version-url
+V 86
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/event.c
+END
+fdcalib_util.c
+K 25
+svn:wc:ra_dav:version-url
+V 93
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/fdcalib_util.c
+END
+convtime.c
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/convtime.c
+END
+filestack.c
+K 25
+svn:wc:ra_dav:version-url
+V 90
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/filestack.c
+END
+bank_list.c
+K 25
+svn:wc:ra_dav:version-url
+V 90
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/bank_list.c
+END
+astro.c
+K 25
+svn:wc:ra_dav:version-url
+V 86
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/astro.c
+END
+caldat.c
+K 25
+svn:wc:ra_dav:version-url
+V 87
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/caldat.c
+END
+coords.c
+K 25
+svn:wc:ra_dav:version-url
+V 87
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/uti/lib/coords.c
+END

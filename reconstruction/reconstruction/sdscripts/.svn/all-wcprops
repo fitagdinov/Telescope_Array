@@ -1,0 +1,95 @@
+K 25
+svn:wc:ra_dav:version-url
+V 74
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts
+END
+sdmc_run_sdmc_spctr_script
+K 25
+svn:wc:ra_dav:version-url
+V 101
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_run_sdmc_spctr_script
+END
+sdrec_script
+K 25
+svn:wc:ra_dav:version-url
+V 87
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdrec_script
+END
+sdmc_showlib_info_py_script
+K 25
+svn:wc:ra_dav:version-url
+V 102
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_showlib_info_py_script
+END
+sdmc_run_sdmc_conv_e2_to_hires_spctr_script
+K 25
+svn:wc:ra_dav:version-url
+V 118
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_run_sdmc_conv_e2_to_hires_spctr_script
+END
+sdmc_run_sdmc_calib_extract_script
+K 25
+svn:wc:ra_dav:version-url
+V 109
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_run_sdmc_calib_extract_script
+END
+sd_prep4hb
+K 25
+svn:wc:ra_dav:version-url
+V 85
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sd_prep4hb
+END
+sdmc_run_sdmc_calib_check_script
+K 25
+svn:wc:ra_dav:version-url
+V 107
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_run_sdmc_calib_check_script
+END
+sdmc_run_sdmc_conv_e2_to_spctr_script
+K 25
+svn:wc:ra_dav:version-url
+V 112
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_run_sdmc_conv_e2_to_spctr_script
+END
+sdmc_run_sdmc_byday_script
+K 25
+svn:wc:ra_dav:version-url
+V 101
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_run_sdmc_byday_script
+END
+sdmc_run_sdmc_tsort_script
+K 25
+svn:wc:ra_dav:version-url
+V 101
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_run_sdmc_tsort_script
+END
+sdrec_parallel_script
+K 25
+svn:wc:ra_dav:version-url
+V 96
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdrec_parallel_script
+END
+sdmc_calib_check2rt_py_script
+K 25
+svn:wc:ra_dav:version-url
+V 104
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_calib_check2rt_py_script
+END
+sdmc_prep_sdmc_run_py_script
+K 25
+svn:wc:ra_dav:version-url
+V 103
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_prep_sdmc_run_py_script
+END
+sded_script
+K 25
+svn:wc:ra_dav:version-url
+V 86
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sded_script
+END
+sdmc_cmb_tothrow_files_py_script
+K 25
+svn:wc:ra_dav:version-url
+V 107
+/svn/tasoft/!svn/ver/6889/branches/ivanov/sdanalysis_2020/legacy/sdscripts/sdmc_cmb_tothrow_files_py_script
+END

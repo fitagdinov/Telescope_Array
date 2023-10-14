@@ -1,0 +1,550 @@
+#!/usr/bin/env bash
+
+# in case if something doesn't work then save the information that describes why it didn't work
+fail=0
+cmdargs_given=1
+temp_log='/tmp/'$(basename $0)'_'${USER}_${RANDOM}_'temp.log'
+touch $temp_log
+echo "START: "${HOSTNAME}" "$(date +"%Y%m%d %H%M%S %Z") >> $temp_log
+
+test ${#ROOTSYS} -eq 0 && fail=$((fail+1)) && echo "error(${fail}): ROOTSYS environmental variable is not set" >> $temp_log
+
+
+# CERN Root run - time environment
+if [ ${#ROOTSYS} -gt 0 ]; then 
+    thisroot_sh=$ROOTSYS/bin/thisroot.sh
+    test ! -f $thisroot_sh && fail=$((fail+1)) && echo "error(${fail}): $thisroot_sh not found" >> $temp_log
+    test -f $thisroot_sh && source $thisroot_sh
+fi
+
+
+# make sure that the resource environmental variable is defined
+if [ ${#COMMON_RESOURCE_DIRECTORY_LOCAL} -eq 0 ]; then
+    export COMMON_RESOURCE_DIRECTORY_LOCAL=$(readlink -f $(dirname $0))
+    echo "warning: COMMON_RESOURCE_DIRECTORY_LOCAL not set; " \
+        "setting  COMMON_RESOURCE_DIRECTORY_LOCAL to ${COMMON_RESOURCE_DIRECTORY_LOCAL}" >>$temp_log
+fi
+test ! -d $COMMON_RESOURCE_DIRECTORY_LOCAL && fail=$((fail+1)) && echo "error(${fail}): ${COMMON_RESOURCE_DIRECTORY_LOCAL} directory not found" >> $temp_log
+
+
+# look for the SDDIR one directory above that of the script
+test ${#SDDIR} -eq 0 && export SDDIR=$(dirname $(dirname $(readlink -f $0)))
+SDBINDIR=${SDDIR}/bin
+test ! -d ${SDDIR}/bin \
+    && fail=$((fail+1)) \
+    && echo "error(${fail}): \$SDDIR environmental variable not properly set: can't find \$SDDIR/bin directory" >> $temp_log
+
+
+# SD analysis programs
+sdatm_calib=${SDDIR}/bin/sdatm_calib.run
+dstlist=${SDDIR}/bin/dstlist.run
+bsdinfo=${SDDIR}/bin/bsdinfo.run
+sdbsearch=${SDDIR}/bin/sdbsearch.run
+remhytrig=${SDDIR}/bin/remhytrig.run
+rufptn=${SDDIR}/bin/rufptn.run
+sdtrgbk=${SDDIR}/bin/sdtrgbk.run
+rufldf=${SDDIR}/bin/rufldf.run
+sdatm_corr=${SDDIR}/bin/sdatm_corr.run
+dst2rt_sd=${SDDIR}/bin/dst2rt_sd.run
+rusdhist=${SDDIR}/bin/rusdhist.run
+sdascii=${SDDIR}/bin/sdascii.run
+
+test ${#SDDIR} -eq 0 && fail=$((fail+1)) && echo "error(${fail}): SDDIR environmental variable is not set or found" >> $temp_log
+if [ ${#SDDIR} -gt 0 ]; then
+    if [ -d ${SDDIR} ]; then
+	test ! -x $sdatm_calib  && fail=$((fail+1)) && echo "error(${fail}): $sdatm_calib executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $dstlist      && fail=$((fail+1)) && echo "error(${fail}): $dstlist executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $bsdinfo      && fail=$((fail+1)) && echo "error(${fail}): $bsdinfo executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $bsdinfo      && fail=$((fail+1)) && echo "error(${fail}): $sdbsearch executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $remhytrig    && fail=$((fail+1)) && echo "error(${fail}): $remhytrig executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $rufptn       && fail=$((fail+1)) && echo "error(${fail}): $rufptn executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $sdtrgbk      && fail=$((fail+1)) && echo "error(${fail}): $sdtrgbk executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $sdatm_corr   && fail=$((fail+1)) && echo "error(${fail}): $sdatm_corr executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $rufldf       && fail=$((fail+1)) && echo "error(${fail}): $rufldf executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $dst2rt_sd    && fail=$((fail+1)) && echo "error(${fail}): $dst2rt_sd executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $rusdhist     && fail=$((fail+1)) && echo "error(${fail}): $rusdhist executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+	test ! -x $sdascii      && fail=$((fail+1)) && echo "error(${fail}): $sdascii executable not found" >> $temp_log \
+	    && echo "try setting \$SDDIR environmental variable correctly (export SDDIR=/full/path/to/sdanalysis/build)" >>$temp_log \
+	    && echo "and/or compiling sdanalysis" >>$temp_log
+    else
+	fail=$((fail+1))
+	echo "error(${fail}): SDDIR=${SDDIR} directory not found" >> $temp_log
+    fi
+fi
+
+
+# resources
+gdas_dst_gz=${COMMON_RESOURCE_DIRECTORY_LOCAL}/gdas.dst.gz
+
+
+has_events()
+{
+    $dstlist $1 2>/dev/null | head -1 | wc -l
+}
+
+
+# running options
+rufptn_opt=""
+sdtrgbk_opt=""
+rufldf_opt="-no_bw"
+sdatm_corr_opt=""
+rusdhist_opt="-no_bw -tb 1"
+dst2rt_sd_opt="-no_v -tb -mc -bsdinfo -gdas"
+sdascii_standard_spectrum_cuts_opt="-no_bw -form 1 -tb -brd 0 -za 45.0"
+sdascii_ani_cuts_opt="-no_bw -form 1 -tb -brd 1 -za 55.0"
+
+
+my_name=$(basename $0)
+if [ $# -ne 3 -a $# -ne 2 ]; then
+    echo "" >> $temp_log
+    echo "" >> $temp_log
+    echo "TA SD Analysis, full chain">> $temp_log
+    echo "Author: Dmitri Ivanov <dmiivanov@gmail.com>">> $temp_log
+    echo "" >> $temp_log
+    echo "Execute TA SD analysis on one input dst file:" >> $temp_log
+    echo "- Acceptible input file extensions are '.dst', '.dst.gz', or '.dst.bz2'." >> $temp_log
+    echo "- Events in the input file are expected to have at least 'rusdraw' or" >> $temp_log
+    echo "  'tasdcalibev' DST bank(s). (You can check this by running utility" >> $temp_log
+    echo "  'dstlist.run' on the input file.  It prints DST banks in each event.)">> $temp_log
+    echo "- When the analysis passes finish, a .done - file is created in the output directory.">> $temp_log
+    echo "- The .done - file has the same base name as the input file plus a '.done' suffix.">> $temp_log
+    echo "- In case of failure, corresponding .failed - file is created in the output directory">> $temp_log
+    echo "" >> $temp_log
+    echo "Usage: $my_name [infile] [prodir] [outdir]">> $temp_log
+    echo "(1): input DST file (events should have tasdcalibev or rusdraw banks)" >> $temp_log
+    echo "(2): processing directory for any partially completed work">> $temp_log
+    echo "(3): output directory for the results" >> $temp_log
+    echo "" >> $temp_log
+    echo "Alternatively: $my_name [infile] [outdir]">> $temp_log
+    echo "(if you want the processing directory to be the same as the output directory)">> $temp_log
+    echo "(1): input DST file (events should have tasdcalibev or rusdraw banks)" >> $temp_log
+    echo "(2): output directory for the analysis results and any partial work" >> $temp_log
+    echo "" >> $temp_log
+    echo "" >> $temp_log
+    cmdargs_given=0
+fi
+
+infile=""
+prodir=""
+outdir=""
+
+if [ $cmdargs_given -eq 1 ]; then
+    infile=$1
+    if [ ! -f $infile ]; then
+        fail=$((fail+1))
+        echo "error(${fail}): input file infile '$infile' doesn't exist">> $temp_log
+    else
+        infile=$(readlink -f $infile)
+    fi
+    prodir=$2
+    if [ ! -d $prodir ]; then
+        fail=$((fail+1))
+        echo "error(${fail}): processing directory '$prodir' doesn't exist">> $temp_log
+        prodir=""
+    else
+        prodir=$(readlink -f $prodir)
+    fi
+    if [ $# -eq 3 ]; then
+	outdir=$3
+    else
+	outdir=$2
+    fi
+    if [ ! -d $outdir ]; then
+        fail=$((fail+1))
+        echo "error(${fail}): output directory '$outdir' doesn't exist">> $temp_log
+        outdir=""
+    else
+        outdir=$(readlink -f $outdir)
+    fi
+fi
+
+test -z $infile && infile=$(basename $0)'_'${USER}_${RANDOM}_'something_failed'
+fbase=$(basename $infile)
+
+# initialize all output and log files
+TMPFILES=""
+OUTFILES=""
+LOGFILES=""
+# strip off the known pass0 suffixes
+fbase0=$(basename $infile .gz)
+fbase0=$(basename $fbase0 .bz2)
+fbase0=$(basename $fbase0 .dst)
+fbase0=$(basename $fbase0 .rusdraw)    
+targzlog=$prodir/$fbase0'.sdrec_logs.tar.gz'
+
+while [ $fail -eq 0 -a $cmdargs_given -eq 1 ]; do
+    
+    # start the general SD reconstruction log file
+    sdreclog=$prodir/$fbase0'.sdrec.log'
+    touch $sdreclog
+    LOGFILES=$LOGFILES$sdreclog" "
+
+    
+    n=$(has_events $infile)
+    test $n -eq 0 && echo "NO EVENTS IN ${infile}; STOP" >> $sdreclog && break
+    
+    # if we have GDAS calibration file then calibrate the events with that
+    next_step_file=""
+    if [ -f $gdas_dst_gz ]; then
+	echo "Notice: since \$COMMON_RESOURCE_DIRECTORY_LOCAL/gdas_dst.gz (${gdas_dst_gz}) is found, " \
+	    "doing atmospheric calibration and correction" >> $temp_log
+	echo "Doing atmospheric calibration, " \
+	    "\$COMMON_RESOURCE_DIRECTORY_LOCAL/gdas_dst.gz (${gdas_dst_gz}) is found" >> $sdreclog
+	sdatm_calib_dstfile=$prodir/$fbase0.sdatm_calib.dst.gz
+	sdatm_calib_logfile=$prodir/$fbase0.sdatm_calib.log
+	$sdatm_calib $infile -a $gdas_dst_gz -o1f $sdatm_calib_dstfile  >&$sdatm_calib_logfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${sdatm_calib} has failed" >> $temp_log
+	    break
+	fi
+	TMPFILES=$TMPFILES$sdatm_calib_dstfile" "
+	LOGFILES=$LOGFILES$sdatm_calib_logfile" "
+	n=$(has_events $sdatm_calib_dstfile)
+	test $n -eq 0 && echo "NO EVENTS IN ${sdatm_calib_dstfile}; STOP" >> $sdreclog && break
+	next_step_file=$sdatm_calib_dstfile
+    else
+	echo "Notice: no \$COMMON_RESOURCE_DIRECTORY_LOCAL/gdas_dst.gz (${gdas_dst_gz}) found, " \
+	    "not doing atmospheric calibration and correction" >> $temp_log
+	echo "Not doing atmospheric calibration, " \
+	    "\$COMMON_RESOURCE_DIRECTORY_LOCAL/gdas_dst.gz (${gdas_dst_gz}) not found" >> $sdreclog
+	next_step_file=$infile
+    fi
+    
+    # run program that diagnoses bad SDs and adds bsdinfo DST bank
+    bsd_dstfile=$prodir/$fbase0.bsd.dst.gz
+    bsd_logfile=$prodir/$fbase0.bsd.log
+    LOGFILES=$LOGFILES$bsd_logfile" "
+    $bsdinfo -i $next_step_file -o $bsd_dstfile  >&$bsd_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${bsdinfo} has failed" >> $temp_log
+	break
+    fi
+    TMPFILES=$TMPFILES$bsd_dstfile" "
+    n=$(has_events $bsd_dstfile)
+    test $n -eq 0 && echo "NO EVENTS IN ${bsd_dstfile}; STOP" >> $sdreclog && break
+
+
+    # run SD burst event search program
+    sdbsearch_dstfile=$prodir/$fbase0.sdbsearch.dst.gz
+    sdbsearch_logfile=$prodir/$fbase0.sdbsearch.log
+    LOGFILES=$LOGFILES$sdbsearch_logfile" "
+    $sdbsearch -o1f $sdbsearch_dstfile $bsd_dstfile >&$sdbsearch_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${sdbsearch} has failed" >> $temp_log
+	break
+    fi
+    TMPFILES=$TMPFILES$sdbsearch_dstfile" "
+    n=$(has_events $sdbsearch_dstfile)
+    if [ $n -gt 0 ]; then
+	# if we have GDAS calibration file then calibrate the events with that
+	next_step_file=""
+	if [ -f $gdas_dst_gz ]; then
+	    echo "Adding atmospheric calibration information to SD burst events" >> $sdreclog
+	    sdbsearch_sdatm_calib_dstfile=$prodir/$fbase0.sdbsearch_sdatm_calib.dst.gz
+	    sdbsearch_sdatm_calib_logfile=$prodir/$fbase0.sdbsearch_sdatm_calib.log
+	    LOGFILES=$LOGFILES$sdbsearch_sdatm_calib_logfile" "
+	    $sdatm_calib $sdbsearch_dstfile -a $gdas_dst_gz -o1f $sdbsearch_sdatm_calib_dstfile  >&$sdbsearch_sdatm_calib_logfile
+	    if [ $? -ne 0 ]; then
+		fail=$((fail+1))
+		echo "error(${fail}): ${sdatm_calib} has failed" >> $temp_log
+		break
+	    fi
+	    TMPFILES=$TMPFILES$sdbsearch_sdatm_calib_dstfile" "
+	    n=$(has_events $sdbsearch_sdatm_calib_dstfile)
+	    next_step_file=$sdbsearch_sdatm_calib_dstfile
+	else
+	    echo "Not doing atmospheric calibration for SD burst events, ${gdas_dst_gz} file not found" >> $sdreclog
+	    next_step_file=$sdbsearch_dstfile
+	fi
+	sdbsearch_rufptn_dstfile=$prodir/$fbase0.sdbsearch.rufptn.dst.gz
+	sdbsearch_rufldf_dstfile=$prodir/$fbase0.sdbsearch.rufldf.dst.gz
+	sdbsearch_rtfile=$prodir/$fbase0.sdbsearch.result.root
+	sdbsearch_dtfile=$prodir/$fbase0.sdbsearch.detailed.root
+	$rufptn $rufptn_opt $next_step_file -o1f $sdbsearch_rufptn_dstfile \
+	    1>> $sdbsearch_logfile 2>> $sdbsearch_logfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${rufptn} (sdbsearch) has failed" >> $temp_log
+	    break
+	fi
+	$rufldf $rufldf_opt $sdbsearch_rufptn_dstfile -o1f $sdbsearch_rufldf_dstfile \
+	    1>> $sdbsearch_logfile 2>> $sdbsearch_logfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${rufldf} (sdbsearch) has failed" >> $temp_log
+	    break
+	fi
+	$dst2rt_sd $dst2rt_sd_opt $sdbsearch_rufldf_dstfile -o $prodir -pr $(basename $sdbsearch_rtfile .result.root) \
+	    1>> $sdbsearch_logfile 2>> $sdbsearch_logfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${dst2rt_sd} (sdbsearch) has failed" >> $temp_log
+	    break
+	fi
+	TMPFILES=$TMPFILES$sdbsearch_rufptn_dstfile" "
+	TMPFILES=$TMPFILES$sdbsearch_rtfile" "
+	OUTFILES=$OUTFILES$sdbsearch_rufldf_dstfile" "
+	OUTFILES=$OUTFILES$sdbsearch_dtfile" "
+    fi
+    
+    # run pure hybrid trigger event removal program
+    nht_dstfile=$prodir/$fbase0.nht.dst.gz
+    nht_logfile=$prodir/$fbase0.nht.log
+    LOGFILES=$LOGFILES$nht_logfile" "
+    $remhytrig -o1f $nht_dstfile $bsd_dstfile >&$nht_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${remhytrig} has failed" >> $temp_log
+	break
+    fi
+    TMPFILES=$TMPFILES$nht_dstfile" "
+    n=$(has_events $nht_dstfile)
+    test $n -eq 0 && echo "NO EVENTS IN ${nht_dstfile}; STOP" >> $sdreclog && break
+    
+    # run rufptn analysis (pattern recognition, initial geometry fitting)
+    # this will also create rusdraw bank (if there isn't one)
+    rufptn_dstfile=$prodir/$fbase0.rufptn.dst.gz
+    rufptn_logfile=$prodir/$fbase0.rufptn.log
+    LOGFILES=$LOGFILES$rufptn_logfile" "
+    $rufptn $rufptn_opt $nht_dstfile -o1f $rufptn_dstfile >&$rufptn_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${rufptn} has failed" >> $temp_log
+	break
+    fi
+    TMPFILES=$TMPFILES$rufptn_dstfile" "
+    n=$(has_events $rufptn_dstfile)
+    test $n -eq 0 && echo "NO EVENTS IN ${rufptn_dstfile}; STOP" >> $sdreclog && break
+    
+    # run SD trigger backup program, this will add sdtrgbk bank
+    sdtrgbk_dstfile=$prodir/$fbase0.sdtrgbk.dst.gz
+    sdtrgbk_logfile=$prodir/$fbase0.sdtrgbk.log
+    LOGFILES=$LOGFILES$sdtrgbk_logfile" "
+    $sdtrgbk $sdtrgbk_opt -o1f $sdtrgbk_dstfile $rufptn_dstfile >&$sdtrgbk_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${sdtrgbk} has failed" >> $temp_log
+	break
+    fi
+    TMPFILES=$TMPFILES$sdtrgbk_dstfile" "
+    n=$(has_events $sdtrgbk_dstfile)
+    test $n -eq 0 && echo "NO EVENTS IN ${sdtrgbk_dstfile}; STOP" >> $sdreclog && break
+    
+    # run rufldf analysis (LDF fitting, updating geometry)
+    # and also run atmospheric correction which works only on data
+    # and not Monte Carlo, and only if gdas.dst.gz file was available
+    # in ${COMMON_RESOURCE_DIRECTORY_LOCAL} directory
+
+    rufldf_dstfile=$prodir/$fbase0.noCuts.dst.gz
+    rufldf_logfile=$prodir/$fbase0.rufldf.log
+    LOGFILES=$LOGFILES$rufldf_logfile" "
+    if [ -f $gdas_dst_gz ]; then
+	rufldf_dstfile=$prodir/$fbase0.rufldf.dst.gz
+    fi
+    $rufldf $rufldf_opt $sdtrgbk_dstfile -o1f $rufldf_dstfile >&$rufldf_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${rufldf} has failed" >> $temp_log
+	break
+    fi
+    if [ -f $gdas_dst_gz ]; then
+	n=$(has_events $rufldf_dstfile)
+	test $n -eq 0 && echo "NO EVENTS IN ${rufldf_dstfile}; STOP" >> $sdreclog && break
+	rufldf_dstfile_old=$rufldf_dstfile
+	TMPFILES=$TMPFILES$rufldf_dstfile_old" "
+	rufldf_dstfile=$prodir/$fbase0.noCuts.dst.gz
+	sdatm_corr_logfile=$prodir/$fbase0.sdatm_corr.log
+	$sdatm_corr $sdatm_corr_opt $rufldf_dstfile_old -o1f $rufldf_dstfile >&$sdatm_corr_logfile
+    fi
+    n=$(has_events $rufldf_dstfile)
+    test $n -eq 0 && echo "NO EVENTS IN ${rufldf_dstfile}; STOP" >> $sdreclog && break
+    OUTFILES=$OUTFILES$rufldf_dstfile" "
+
+    # run dst2rt_sd conversion
+    noCuts_rtfile=$prodir/$fbase0.noCuts.result.root
+    noCuts_dtfile=$prodir/$fbase0.noCuts.detailed.root
+    noCuts_logfile=$prodir/$fbase0.noCuts.log
+    LOGFILES=$LOGFILES$noCuts_logfile" "
+    $dst2rt_sd $dst2rt_sd_opt $rufldf_dstfile -o $prodir -pr $(basename $noCuts_rtfile .result.root) >&$noCuts_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${dst2rt_sd} has failed" >> $temp_log
+	break
+    fi
+    TMPFILES=$TMPFILES$noCuts_dtfile" "
+    OUTFILES=$OUTFILES$noCuts_rtfile" "
+    
+    # run rusdhist
+    rusdhist_hstfile=$prodir/$fbase0.hst.root
+    rusdhist_logfile=$prodir/$fbase0.rusdhist.log
+    LOGFILES=$LOGFILES$rusdhist_logfile" "
+    $rusdhist $rusdhist_opt $rufldf_dstfile -o $rusdhist_hstfile >&$rusdhist_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${rusdhist} has failed" >> $temp_log
+	break
+    fi
+    OUTFILES=$OUTFILES$rusdhist_hstfile" "
+    
+    # run sdascii on events using spectrum cuts
+    # that include theta < 45 degree and Dborder > 1200m
+    sdascii_opt=$sdascii_standard_spectrum_cuts_opt
+    specCuts_txtfile=$prodir/$fbase0.specCuts.txt
+    specCuts_dstfile=$prodir/$fbase0.specCuts.dst.gz
+    specCuts_logfile=$prodir/$fbase0.specCuts.log
+    LOGFILES=$LOGFILES$specCuts_logfile" "
+    $sdascii $sdascii_opt $rufldf_dstfile -o $specCuts_txtfile -dsto $specCuts_dstfile >&$specCuts_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${sdascii} has failed" >> $temp_log
+	break
+    fi
+    n=$(has_events $specCuts_dstfile)	
+    if [ $n -gt 0 ]; then
+	# save output files
+	OUTFILES=$OUTFILES$specCuts_txtfile" "$specCuts_dstfile" "
+	# run dst2rt_sd conversion now on events with spectrum cuts
+        # that include theta < 45 degree and Dborder > 1200m
+	specCuts_rtfile=$prodir/$fbase0.specCuts.result.root
+	specCuts_dtfile=$prodir/$fbase0.specCuts.detailed.root
+	$dst2rt_sd $dst2rt_sd_opt $specCuts_dstfile -o $prodir -pr $(basename $specCuts_rtfile .result.root) >&$specCuts_logfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${dst2rt_sd} has failed" >> $temp_log
+	    break
+	fi
+	OUTFILES=$OUTFILES$specCuts_rtfile" "$specCuts_dtfile" "
+    else
+	# discard output files
+	echo "NO EVENTS IN ${specCuts_dstfile}" >> $sdreclog
+	TMPFILES=$TMPFILES$specCuts_txtfile" "$specCuts_dstfile" "
+    fi
+    
+    # run sdascii on events using anisotropy cuts
+    # that include theta < 55 degree and largest signal counter
+    # being surrounded by 4 working counters.
+    sdascii_opt=$sdascii_ani_cuts_opt
+    aniCuts_txtfile=$prodir/$fbase0.aniCuts.txt
+    aniCuts_dstfile=$prodir/$fbase0.aniCuts.dst.gz
+    aniCuts_logfile=$prodir/$fbase0.aniCuts.log
+    LOGFILES=$LOGFILES$aniCuts_logfile" "
+    $sdascii $sdascii_opt $rufldf_dstfile -o $aniCuts_txtfile -dsto $aniCuts_dstfile >&$aniCuts_logfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): ${sdascii} has failed" >> $temp_log
+	break
+    fi
+    n=$(has_events $aniCuts_dstfile)
+    if [ $n -gt 0 ]; then
+	# save output files
+	OUTFILES=$OUTFILES$aniCuts_txtfile" "$aniCuts_dstfile" "
+        # run dst2rt_sd conversion now on events with anisotropy cuts
+        # that include theta < 55 degree and largest VEM counter being surrounded by 4 working counters.
+	aniCuts_rtfile=$prodir/$fbase0.aniCuts.result.root
+	aniCuts_dtfile=$prodir/$fbase0.aniCuts.detailed.root
+	$dst2rt_sd $dst2rt_sd_opt $aniCuts_dstfile -o $prodir -pr $(basename $aniCuts_rtfile .result.root) >&$aniCuts_logfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${dst2rt_sd} has failed" >> $temp_log
+	    break
+	fi
+	OUTFILES=$OUTFILES$aniCuts_rtfile" "$aniCuts_dtfile" "
+    else
+	# discard output files
+	echo "NO EVENTS IN ${aniCuts_dstfile}" >> $sdreclog
+	TMPFILES=$TMPFILES$aniCuts_rtfile" "$aniCuts_dtfile" "
+    fi
+    
+    # break out of the main loop
+    break
+    
+done
+
+# move the outputs and the log files
+if [ $fail -eq 0 -a $cmdargs_given -eq 1 ]; then
+    # put all log files into a .tar.gz archive
+    cd $prodir
+    LOGLIST=""
+    for logfile in $LOGFILES; do
+	LOGLIST=$LOGLIST$(basename $logfile)" "
+    done
+    tar -czf $targzlog $LOGLIST
+    TMPFILES=$TMPFILES$LOGFILES
+    # move the outputs to the specified output directory if the output directory
+    # is not the same as the processing directory
+    if [ $outdir != $prodir ]; then
+	if [ ${#OUTFILES} -gt 0 ]; then
+	    rsync -au $OUTFILES $outdir/.
+	    test $? -ne 0 && fail=$((fail+1)) && \
+		echo "error(${fail}): failed to copy ${OUTFILES} to ${outdir}" >> $temp_log && breakq
+	    rsync -au $targzlog $outdir/.
+	    test $? -ne 0 && fail=$((fail+1)) && \
+		echo "error(${fail}): failed to copy ${targzlog} to ${outdir}" >> $temp_log && break
+	fi
+    fi
+else
+    test ${#LOGFILES} -gt 0 && cat ${LOGFILES} >> $temp_log
+fi
+
+# Always clean up local temporary files, if any
+test ${#TMPFILES} -gt 0 && rm -f ${TMPFILES}
+test ${#LOGFILES} -gt 0 && rm -f ${LOGFILES}
+
+# clean up local output files if output directory is
+# not the same as the processing directory
+if [ $outdir != $prodir ]; then
+    test ${#OUTFILES} -gt 0 && rm -f ${OUTFILES}
+    rm -f ${targzlog}
+fi
+
+# if something failed, indicate the fail count
+if [ $cmdargs_given -eq 0 ]; then
+    echo "Command line arguments not given properly" >> $temp_log
+    test $fail -gt 0 && echo "Besides the command line arguments, something else has failed, fail count = ${fail}" >> $temp_log
+else
+    test $fail -gt 0 && echo "Something has failed, fail count = ${fail}" >> $temp_log
+fi
+echo "FINISH: "${HOSTNAME}" "$(date +"%Y%m%d %H%M%S %Z") >> $temp_log
+if [ ! -z $outdir ]; then
+    done_file=$outdir/$fbase'.done'
+    failed_file=$outdir/$fbase'.failed'
+    status_file=${done_file}
+    test $fail -gt 0 && status_file=${failed_file}
+    if [ $fail -gt 0 ]; then
+        echo "fail count = ${fail}" >> ${status_file}
+    fi
+    cat $temp_log >> ${status_file}
+else
+    cat $temp_log >&2
+fi
+
+rm -f $temp_log
+
+# Exit with the flag.  If success, then fail should be zero.
+exit $fail
+

@@ -1,0 +1,10 @@
+K 13
+svn:mergeinfo
+V 378
+/branches/SDanalysis/rusdpass0_ds2/src/rusdpass0io.cpp:692-1432
+/branches/ivanov/SDanalysis/rusdpass0/src/rusdpass0io.cpp:1870-4500
+/branches/ivanov/SDanalysis/rusdpass0_ds2/src/rusdpass0io.cpp:1433-1869
+/tags/sdanalysis_v2.9/rusdpass0/src/rusdpass0io.cpp:2519
+/trunk/sdanalysis/rusdpass0/src/rusdpass0io.cpp:1875-2616
+/trunk/sdanalysis/rusdpass0_ds2/src/rusdpass0io.cpp:692-693
+END

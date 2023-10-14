@@ -1,0 +1,10 @@
+K 13
+svn:mergeinfo
+V 284
+/branches/SDanalysis/makefileset.inc:692-1432
+/branches/ivanov/SDanalysis/makefileset.inc:1433-1447
+/branches/ivanov/SDanalysis/makefileset.mk:1448-3278
+/tags/sdanalysis_v2.9/makefileset.mk:2953-3281
+/trunk/sdanalysis/makefileset.inc:692-693
+/trunk/sdanalysis/makefileset.mk:1861-3279
+END

@@ -1,0 +1,17 @@
+K 10
+svn:ignore
+V 63
+.project
+.cproject
+*.run
+*.so
+*.a
+*~
+*#
+*Dict*
+
+*.mk
+
+makefile
+
+END

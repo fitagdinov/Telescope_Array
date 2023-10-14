@@ -1,0 +1,143 @@
+K 25
+svn:wc:ra_dav:version-url
+V 73
+/svn/tasoft/!svn/ver/6872/branches/ivanov/sdanalysis_2020/pass1plot/macro
+END
+sdps3fit.C
+K 25
+svn:wc:ra_dav:version-url
+V 84
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/sdps3fit.C
+END
+drawEvent.C
+K 25
+svn:wc:ra_dav:version-url
+V 85
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/drawEvent.C
+END
+fdgeom.C
+K 25
+svn:wc:ra_dav:version-url
+V 82
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/fdgeom.C
+END
+gldfFitting.C
+K 25
+svn:wc:ra_dav:version-url
+V 87
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/gldfFitting.C
+END
+sdborderlines.h
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/sdborderlines.h
+END
+miscFun.C
+K 25
+svn:wc:ra_dav:version-url
+V 83
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/miscFun.C
+END
+load_lib.C
+K 25
+svn:wc:ra_dav:version-url
+V 84
+/svn/tasoft/!svn/ver/6872/branches/ivanov/sdanalysis_2020/pass1plot/macro/load_lib.C
+END
+mdgeom.C
+K 25
+svn:wc:ra_dav:version-url
+V 82
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/mdgeom.C
+END
+dst_banks.C
+K 25
+svn:wc:ra_dav:version-url
+V 85
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/dst_banks.C
+END
+gtplot.C
+K 25
+svn:wc:ra_dav:version-url
+V 82
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/gtplot.C
+END
+coortrans.C
+K 25
+svn:wc:ra_dav:version-url
+V 85
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/coortrans.C
+END
+plotVars.C
+K 25
+svn:wc:ra_dav:version-url
+V 84
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/plotVars.C
+END
+geomFitting.C
+K 25
+svn:wc:ra_dav:version-url
+V 87
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/geomFitting.C
+END
+user_steering.C
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/user_steering.C
+END
+plotEvent.C
+K 25
+svn:wc:ra_dav:version-url
+V 85
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/plotEvent.C
+END
+waveform.C
+K 25
+svn:wc:ra_dav:version-url
+V 84
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/waveform.C
+END
+formattedWriting.C
+K 25
+svn:wc:ra_dav:version-url
+V 92
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/formattedWriting.C
+END
+init_event_display.C
+K 25
+svn:wc:ra_dav:version-url
+V 94
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/init_event_display.C
+END
+ldfFitting.C
+K 25
+svn:wc:ra_dav:version-url
+V 86
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/ldfFitting.C
+END
+debugging.C
+K 25
+svn:wc:ra_dav:version-url
+V 85
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/debugging.C
+END
+drawing.C
+K 25
+svn:wc:ra_dav:version-url
+V 83
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/drawing.C
+END
+glob_var.C
+K 25
+svn:wc:ra_dav:version-url
+V 84
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/glob_var.C
+END
+plotStats.C
+K 25
+svn:wc:ra_dav:version-url
+V 85
+/svn/tasoft/!svn/ver/6856/branches/ivanov/sdanalysis_2020/pass1plot/macro/plotStats.C
+END

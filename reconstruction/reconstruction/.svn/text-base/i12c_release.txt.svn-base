@@ -1,0 +1,13 @@
+*** nuf.i12c release notes ***
+
+
+=== i12c modifications compared to i12aop ===
+
+    a. added new output format 
+    b. -geom option is now on by default
+    c. updated build system. To build automatically
+       with sdanalysis add the following lines to ../Makefile
+NUF=$(SDDIR)/nuf.i12c
+include $(NUF)/nuf.mk
+       before pass1plot:
+

@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+
+# in case if something doesn't work then save the information that describes why it didn't work
+fail=0
+cmdargs_given=1
+temp_log='/tmp/'$(basename $0)'_'${USER}_${RANDOM}_'temp.log'
+touch $temp_log
+echo "START: "${HOSTNAME}" "$(date +"%Y%m%d %H%M%S %Z") >> $temp_log
+
+
+# Program
+sdmc_conv_e2_to_spctr=$SDDIR/bin/sdmc_conv_e2_to_spctr.run
+
+test ${#SDDIR} -eq 0 && fail=$((fail+1)) && echo "error(${fail}): SDDIR environmental variable is not set" >> $temp_log
+if [ ${#SDDIR} -gt 0 ]; then
+    if [ -d ${SDDIR} ]; then
+	test ! -x $sdmc_conv_e2_to_spctr && fail=$((fail+1)) && echo "error(${fail}): $sdmc_conv_e2_to_spctr executable not found" >> $temp_log
+    else
+	fail=$((fail+1))
+	echo "error(${fail}): SDDIR=${SDDIR} directory not found" >> $temp_log
+    fi
+fi
+
+
+my_name=$(basename $0)
+if [ $# -ne 3 ]; then
+    echo "" >> $temp_log
+    echo "" >> $temp_log
+    echo "Convert SD MC DST files from E^-2 to HiRes spectrum">> $temp_log
+    echo "Author: Dmitri Ivanov <dmiivanov@gmail.com>">> $temp_log
+    echo "" >> $temp_log
+    echo "Usage: $my_name [infile] [prodir] [outdir]">> $temp_log
+    echo "(1): input ASCII list file with paths to DST files" >> $temp_log
+    echo "(2): processing directory for any partially completed work">> $temp_log
+    echo "(3): output directory for the results" >> $temp_log
+    cmdargs_given=0
+fi
+
+infile=""
+prodir=""
+outdir=""
+
+if [ $cmdargs_given -eq 1 ]; then
+    infile=$1
+    if [ ! -f $infile ]; then
+        fail=$((fail+1))
+        echo "error(${fail}): input file infile '$infile' doesn't exist">> $temp_log
+    else
+        infile=$(readlink -f $infile)
+    fi
+    prodir=$2
+    if [ ! -d $prodir ]; then
+        fail=$((fail+1))
+        echo "error(${fail}): processing directory '$prodir' doesn't exist">> $temp_log
+        prodir=""
+    else
+        prodir=$(readlink -f $prodir)
+    fi
+    outdir=$3
+    if [ ! -d $outdir ]; then
+        fail=$((fail+1))
+        echo "error(${fail}): output directory '$outdir' doesn't exist">> $temp_log
+        outdir=""
+    else
+        outdir=$(readlink -f $outdir)
+    fi
+fi
+
+test -z $infile && infile=$(basename $0)'_'${USER}_${RANDOM}_'something_failed'
+fbase=$(basename $infile)
+fbase0=$fbase
+fbase0=$(basename ${fbase0} .gz)
+fbase0=$(basename ${fbase0} .bz2)
+fbase0=$(basename ${fbase0} .dst)
+outfile=$prodir/${fbase0}'.sdmc_conv_e2_to_spctr.out'
+errfile=$prodir/${fbase0}'.sdmc_conv_e2_to_spctr.err'
+targzlog=$prodir/${fbase0}'.sdmc_conv_e2_to_spctr_logs.tar.gz'
+# initialize the list of all output files
+OUTFILES=""
+
+while [ $fail -eq 0 -a $cmdargs_given -eq 1 ]; do
+      
+    # RUN the E^{-2} to HiRes spectrum conversion program for standard energy thresholds
+    # unless otherwise requested by the environmental variable
+    if [ ${#sdmc_conv_e2_to_spctr_e0} -eq 0 ]; then
+    
+        # starting at 10^17.45 eV
+	hrspctr_1745_dst_gz_file=$prodir/${fbase0}'.hrspctr.1745.dst.gz'
+	$sdmc_conv_e2_to_spctr -e0 0.3162 -s 1 -o $hrspctr_1745_dst_gz_file $infile 1>>$outfile 2>>$errfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${sdmc_conv_e2_to_spctr} has failed" >> $temp_log
+	    cat $errfile >> $temp_log
+	    break
+	fi
+	test -f ${hrspctr_1745_dst_gz_file} && OUTFILES=$OUTFILES$hrspctr_1745_dst_gz_file" "
+	
+        # starting at 10^18.95 eV
+	hrspctr_1895_dst_gz_file=$prodir/${fbase0}'.hrspctr.1895.dst.gz'
+	$sdmc_conv_e2_to_spctr -e0 8.9125 -s 1 -o $hrspctr_1895_dst_gz_file $infile 1>>$outfile 2>>$errfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${sdmc_conv_e2_to_spctr} has failed" >> $temp_log
+	    cat $errfile >> $temp_log
+	    break
+	fi
+	test -f ${hrspctr_1895_dst_gz_file} && OUTFILES=$OUTFILES$hrspctr_1895_dst_gz_file" "
+	
+        # starting at 10^19.45 eV
+	hrspctr_1945_dst_gz_file=$prodir/${fbase0}'.hrspctr.1945.dst.gz'
+	$sdmc_conv_e2_to_spctr -e0 28.1838 -s 1 -o $hrspctr_1945_dst_gz_file $infile 1>>$outfile 2>>$errfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${sdmc_conv_e2_to_spctr} has failed" >> $temp_log
+	    cat $errfile >> $temp_log
+	    break
+	fi
+	test -f ${hrspctr_1945_dst_gz_file} && OUTFILES=$OUTFILES$hrspctr_1945_dst_gz_file" "
+    else
+	# using a customized energy threshold
+	log10EeV=$(echo ${sdmc_conv_e2_to_spctr_e0} | awk '{printf("%.2f",18.0+log($1)/log(10))}')
+	hrspctr_log10EeV_dst_gz_file=$prodir/${fbase0}".hrspctr.${log10EeV}.dst.gz"
+	$sdmc_conv_e2_to_spctr -e0 ${sdmc_conv_e2_to_spctr_e0} -s 1 -o $hrspctr_log10EeV_dst_gz_file $infile 1>>$outfile 2>>$errfile
+	if [ $? -ne 0 ]; then
+	    fail=$((fail+1))
+	    echo "error(${fail}): ${sdmc_conv_e2_to_spctr} has failed" >> $temp_log
+	    cat $errfile >> $temp_log
+	    break
+	fi
+	test -f ${hrspctr_log10EeV_dst_gz_file} && OUTFILES=$OUTFILES$hrspctr_log10EeV_dst_gz_file" "
+    fi
+    
+    # check if there are any output files
+    test ${#OUTFILES} -eq 0 && \
+	echo "NOTICE: NO OUTPUT FILES PRODUCED BY "$(basename ${sdmc_conv_e2_to_spctr})" IN THIS RUN" 2>>$temp_log
+
+    # combine the log files into a tar.gz file
+    cd $prodir
+    tar -czf $targzlog $(basename $outfile) $(basename $errfile) 2>>$errfile
+    if [ $? -ne 0 ]; then
+	fail=$((fail+1))
+	echo "error(${fail}): failed to compress the log files" >> $temp_log
+	cat $errfile >> $temp_log
+	break
+    fi
+    OUTFILES=$OUTFILES$targzlog
+    
+     # copy the result to the output directory
+    rsync -au ${OUTFILES} ${outdir}/. 2>>$temp_log
+    test $? -ne 0 && fail=$((fail+1)) && echo "error(${fail}): failed to transfer ${OUTFILES} to ${outdir}/." >> $temp_log && break
+    
+    # break out of the main loop
+    break
+done
+
+# always clean up
+rm -f $OUTFILES $outfile $errfile
+
+
+# if something failed, indicate the fail count
+if [ $cmdargs_given -eq 0 ]; then
+    echo "Command line arguments not given properly" >> $temp_log
+    test $fail -gt 0 && echo "Besides the command line arguments, something else has failed, fail count = ${fail}" >> $temp_log
+else
+    test $fail -gt 0 && echo "Something has failed, fail count = ${fail}" >> $temp_log
+fi
+echo "FINISH: "${HOSTNAME}" "$(date +"%Y%m%d %H%M%S %Z") >> $temp_log
+if [ ! -z $outdir ]; then
+    done_file=$outdir/$fbase'.done'
+    failed_file=$outdir/$fbase'.failed'
+    status_file=${done_file}
+    test $fail -gt 0 && status_file=${failed_file}
+    if [ $fail -gt 0 ]; then
+        echo "fail count = ${fail}" >> ${status_file}
+    fi
+    cat $temp_log >> ${status_file}
+else
+    cat $temp_log >&2
+fi
+
+rm -f $temp_log
+
+# Exit with the flag.  If success, then fail should be zero.
+exit $fail
+

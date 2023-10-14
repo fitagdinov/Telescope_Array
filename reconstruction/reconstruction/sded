@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+# Automatically generated file.  DO NOT EDIT - all changes will be lost after another build 
+# Instead, edit /net/minus/home/grisha/ta/sdanalysis/sdscripts/sded_script 
+
+test -z $ROOTSYS && echo "error: ROOTSYS environmental variable is not set">&2 && exit 2;
+
+
+# look for the SDDIR at most two directories above that of the script
+if [ ${#SDDIR} -eq 0 ]; then
+    SDDIR=$(dirname $(readlink -f $0))
+    test ! -d $SDDIR/pass1plot && SDDIR=$(dirname ${SDDIR})
+    test ! -d $SDDIR/pass1plot && SDDIR=$(dirname ${SDDIR})
+    test ! -d $SDDIR/pass1plot && \
+	echo "ERROR: failed to find SDDIR (path/to/sdanalysis); try setting SDDIR environmental variable!" && \
+	exit 2
+    export SDDIR
+else
+    if [ -d ${SDDIR} ]; then
+	test ! -d $SDDIR/pass1plot && \
+	    echo "ERROR: failed to find SDDIR/pass1plot ($SDDIR/pass1plot); set SDDIR environmental variable correctly!" && \
+	    exit 2
+    else
+	echo "ERROR: SDDIR=${SDDIR} directory not found; set SDDIR environmental variable correctly!" >&2
+	exit 2
+    fi
+fi
+
+# CERN Root run - time environment
+thisroot_sh=$ROOTSYS/bin/thisroot.sh
+test ! -f $thisroot_sh && echo "error: $thisroot_sh not found">&2 && exit 2;
+source $thisroot_sh
+
+my_name=$(basename $0)
+SDEDDIR=$SDDIR/pass1plot
+test ! -d $SDEDDIR && echo "error: $SDEDDIR not found">&2 && exit 2
+start_chain_C=$SDEDDIR/start_chain.C
+test ! -f $start_chain_C && echo "error: $start_chain_C not found">&2 && exit 2
+export PASS1PLOT_FLIST=/tmp/sded_$(date +"%s")_$RANDOM.tmp
+rm -f $PASS1PLOT_FLIST
+touch $PASS1PLOT_FLIST
+test $? -ne 0 && exit 2
+if [ $# -eq 0 ]; then
+    echo "">&2
+    echo "TA SD Event Display" >&2
+    echo "Author: Dmitri Ivanov <dmiivanov@gmail.com>" >&2
+    echo "" >&2
+    echo "runs pass1plot (event display) on *.root -files (with pass1tree in them)" >&2
+    echo "(E.G. use *.detailed.root -files, produced by 'dst2rt_sd')" >&2
+    echo "" >&2
+    printf "usage: $my_name file1.root file2.root ... and/or -i [list file]\n" >&2
+    echo "" >&2
+    echo "pass one or multiple *.root -file names w/o any prefixes or switches" >&2
+    echo "-i <string>: or give a list file which contains paths to the root-files">&2
+    echo "-b: run root in batch mode">&2
+    echo "" >&2
+    echo "" >&2
+    exit 1
+fi
+listfile=""
+b_mode=""
+while [ ! -z $1 ]; do
+    if [ $1 == "-i" ]; then
+        if [ ! -z $listfile ]; then
+            echo "error: optiont -i used more than once" >&2
+            exit 2
+        fi
+        shift
+        listfile=$1
+        test ! -f $listfile && echo "error: $listfile not found">&2 && exit 2
+        cat $listfile | awk '{ print "readlink -f "$1 }' | bash >>$PASS1PLOT_FLIST
+        shift
+        continue
+    fi
+    if [ $1 == "-b" ]; then
+        b_mode=-b
+        shift
+        continue
+    fi
+    test ! -f $1 && echo "error: $1 not found">&2 && exit 2
+    readlink -f $1 >>$PASS1PLOT_FLIST
+    shift
+done
+root -l $b_mode $start_chain_C

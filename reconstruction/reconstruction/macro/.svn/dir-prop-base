@@ -1,0 +1,20 @@
+K 10
+svn:ignore
+V 49
+*.project
+*.cproject
+*.run
+*.so
+*.a
+*~
+*#
+*Dict*
+
+K 13
+svn:mergeinfo
+V 206
+/branches/ivanov/SDanalysis/pass1plot/macro:1797-1940
+/tags/sdanalysis_standard_45degree/pass1plot/macro:3913-4527
+/tags/sdanalysis_v2.9/pass1plot/macro:2953-3912
+/trunk/sdanalysis/pass1plot/macro:1861-2954
+END

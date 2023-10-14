@@ -1,0 +1,65 @@
+K 25
+svn:wc:ra_dav:version-url
+V 70
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src
+END
+dstsel.c
+K 25
+svn:wc:ra_dav:version-url
+V 79
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstsel.c
+END
+dstsum.c
+K 25
+svn:wc:ra_dav:version-url
+V 79
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstsum.c
+END
+dstdump.c
+K 25
+svn:wc:ra_dav:version-url
+V 80
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstdump.c
+END
+dstshuf.c
+K 25
+svn:wc:ra_dav:version-url
+V 80
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstshuf.c
+END
+dstpart.c
+K 25
+svn:wc:ra_dav:version-url
+V 80
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstpart.c
+END
+dstcat.c
+K 25
+svn:wc:ra_dav:version-url
+V 79
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstcat.c
+END
+dstlist.c
+K 25
+svn:wc:ra_dav:version-url
+V 80
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstlist.c
+END
+dstsplit.c
+K 25
+svn:wc:ra_dav:version-url
+V 81
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstsplit.c
+END
+dstmcm.c
+K 25
+svn:wc:ra_dav:version-url
+V 79
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dstmcm.c
+END
+dststrip.c
+K 25
+svn:wc:ra_dav:version-url
+V 81
+/svn/tasoft/!svn/ver/6896/branches/ivanov/sdanalysis_2020/dst2k-ta/src/dststrip.c
+END

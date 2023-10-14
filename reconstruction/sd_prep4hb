@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+
+# Automatically generated file.  DO NOT EDIT - all changes will be lost after another build 
+# Instead, edit /net/minus/home/grisha/ta/sdanalysis/sdscripts/sd_prep4hb 
+
+test -z $ROOTSYS && echo "error: ROOTSYS environmental variable is not set">&2 && exit 2;
+test -z $SDDIR && echo "error: SDDIR environmental variable is not set">&2 && exit 2;
+
+# CERN Root run - time environment
+thisroot_sh=$ROOTSYS/bin/thisroot.sh
+test ! -f $thisroot_sh && echo "error: $thisroot_sh not found">&2 && exit 2;
+source $thisroot_sh
+
+# SD analysis programs
+bsdinfo=$SDDIR/bin/bsdinfo.run
+remhytrig=$SDDIR/bin/remhytrig.run
+sdtrgbk=$SDDIR/bin/sdtrgbk.run
+remnotrig=$SDDIR/bin/remnotrig.run
+dststrip=$SDDIR/bin/dststrip.run
+
+
+test ! -x $bsdinfo && echo "error: $bsdinfo executable not found">&2 && exit 2;
+test ! -x $remhytrig && echo "error: $remhytrig executable not found">&2 && exit 2;
+test ! -x $sdtrgbk && echo "error: $sdtrgbk executable not found">&2 && exit 2;
+test ! -x $remnotrig && echo "error: $remnotrig executable not found">&2 && exit 2;
+test ! -x $dststrip && echo "error: $dststrip executable not found">&2 && exit 2;
+
+
+
+
+my_name=$(basename $0)
+if [ $# -ne 3 -a $# -ne 2 ]; then
+    echo "">&2
+    echo "">&2
+    echo "Prepare SD data for conventional hybrid analysis">&2
+    echo "Remove bad counters, remove pure hybrid triggered events, and run SD trigger verification">&2
+    echo "Author: Dmitri Ivanov <dmiivanov@gmail.com>">&2
+    echo "" >&2
+    echo "Execute filtering programs on one input dst file:" >&2
+    echo "- Acceptible input file extensions are '.dst', '.dst.gz', or"\
+         "'.dst.bz2'." >&2
+    echo "- Events in the input file are expected to have at least 'rusdraw' or"
+    echo "  'tasdcalibev' DST bank(s). (You can check this by running utility" >&2
+    echo "  'dstlist.run' on the input file.  It prints DST banks in each event.)">&2
+    echo "- When the analysis finishes, a .done -file is created in"\
+	    "the output directory.">&2
+    echo "- The .done -file has the same base name as the input file"\
+         "plus a '.done' suffix.">&2
+    echo ""
+    echo "Usage: $my_name [infile] [prodir] [outdir]">&2
+    echo "(1): input DST file (events should have tasdcalibev or rusdraw banks)" >&2
+    echo "(2): processing directory for any partially completed work">&2
+    echo "(3): output directory for the results" >&2
+    echo "">&2
+    echo "Alternatively: $my_name [infile] [outdir]">&2
+    echo "(if you want the processing directory to be the same "\
+          "as the output directory)">&2
+    echo "(1): input DST file (events should have tasdcalibev or rusdraw banks)" >&2
+    echo "(2): output directory for the analysis results and any partial work" >&2
+    echo ""
+    echo ""
+    exit 2
+fi
+
+infile=$(readlink -f $1)
+test ! -f $infile && echo "error: $infile file doesn't exist">&2 && exit 2;
+
+test $# -eq 3 && prodir=$(readlink -f $2) && outdir=$(readlink -f $3)
+test $# -eq 2 && prodir=$(readlink -f $2) && outdir=$(readlink -f $2)
+test ! -d $prodir && echo "error: $prodir directory doesn't exist">&2 && exit 2;
+test ! -d $outdir && echo "error: $outdir directory doesn't exist">&2 && exit 2;
+
+
+fbase=$(basename $infile)
+
+# strip off the known pass0 suffixes
+fbase0=$(basename $infile .gz)
+fbase0=$(basename $fbase0 .bz2)
+fbase0=$(basename $fbase0 .dst)
+fbase0=$(basename $fbase0 .rusdraw)
+
+# initialize all output and log files
+TMPFILES=""
+OUTFILES=""
+LOGFILES=""
+
+targzlog=$prodir/$fbase0'.sd_prep4hb_logs.tar.gz'
+
+# run program that diagnoses bad SDs and adds bsdinfo DST bank
+bsd_dstfile=$prodir/$fbase0.bsd.dst.gz
+bsd_logfile=$prodir/$fbase0.bsd.log
+$bsdinfo -i $infile -o $bsd_dstfile  >&$bsd_logfile
+TMPFILES=$TMPFILES$bsd_dstfile" "
+LOGFILES=$LOGFILES$bsd_logfile" "
+
+# run pure hybrid trigger event removal program
+nht_dstfile=$prodir/$fbase0.nht.dst.gz
+nht_logfile=$prodir/$fbase0.nht.log
+$remhytrig -o1f $nht_dstfile $bsd_dstfile >&$nht_logfile
+TMPFILES=$TMPFILES$nht_dstfile" "
+LOGFILES=$LOGFILES$nht_logfile" "
+
+# run SD trigger backup program, this will add sdtrgbk bank
+sdtrgbk_dstfile=$prodir/$fbase0.sdtrgbk.dst.gz
+sdtrgbk_logfile=$prodir/$fbase0.sdtrgbk.log
+$sdtrgbk $sdtrgbk_opt -o1f $sdtrgbk_dstfile $nht_dstfile >&$sdtrgbk_logfile
+TMPFILES=$TMPFILES$sdtrgbk_dstfile" "
+LOGFILES=$LOGFILES$sdtrgbk_logfile" "
+
+# run SD no-trigger removal program, this will remove events that don't pass the
+# trigger verification
+trgdstfile_temp=$prodir/$fbase0.sdtrig.temp.dst.gz
+trg_logfile=$prodir/$fbase0.sdtrig.log
+$remnotrig $sdtrgbk_dstfile -o1f $trgdstfile_temp >&$trg_logfile
+TMPFILES=$TMPFILES$trgdstfile_temp" "
+LOGFILES=$LOGFILES$trg_logfile" "
+
+# finally, remove spurious DST banks
+trgdstfile=$prodir/$fbase0.sdtrig.dst
+dststrip_logfile=$prodir/$fbase0.dststrip.log
+$dststrip -bsdinfo -sdtrgbk $trgdstfile_temp -o $trgdstfile >&$dststrip_logfile
+OUTFILES=$OUTFILES$trgdstfile" "
+LOGFILES=$LOGFILES$dststrip_logfile" "
+
+
+
+# put all log files into a .tar.gz archive
+cd $prodir
+LOGLIST=""
+for logfile in $LOGFILES; do
+    LOGLIST=$LOGLIST$(basename $logfile)" "
+done
+tar -czf $targzlog $LOGLIST
+TMPFILES=$TMPFILES$LOGLIST
+
+# move the outputs to the specified output directory if the output directory
+# is not the same as the processing directory
+if [ $outdir != $prodir ]; then
+    mv $OUTFILES $outdir/.
+    mv $targzlog $outdir/.
+fi
+
+# clean up temporary files
+rm -f $TMPFILES
+
+# finialize the processing
+done_file=$outdir/$fbase'.done'
+echo "$0 DONE "$(date +"%Y%m%d-%H%M%S-%Z") > $done_file
+

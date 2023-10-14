@@ -1,0 +1,40 @@
+VPATH = bin:inc:lib:src:src/bank/lib:src/dst/lib:src/uti/lib:
+
+tildes = bin/*~ inc/*~ src/*/lib/*~
+
+
+# including the list of dst banks that need to be compiled
+dstbanks_mk=dstbanks.mk
+$(if $(wildcard $(dstbanks_mk)),,\
+        $(error $(dstbanks_mk) not found))
+include $(dstbanks_mk)
+
+srcbank=$(addsuffix _dst.c, $(dstbanks))
+bank    = $(addprefix src/bank/lib/,${srcbank:.c=.o})
+srcdst  = $(wildcard src/dst/lib/*.c)
+dst     = ${srcdst:.c=.o}
+srcuti  = $(wildcard src/uti/lib/*.c)
+uti     = ${srcuti:.c=.o}
+objs    = $(bank) $(dst) $(uti)
+binsrc  = $(wildcard src/*.c)
+binobj  = ${binsrc:.c=.o}
+bins    = $(subst src/, bin/, ${binobj:.o=.run})
+
+cc   = icc -O3 -ipo -no-prec-div -xHost -fpic
+incs = -Iinc
+libs = -Llib -ldst2k -lm -lc -lz -lbz2
+
+all: lib/libdst2k.a $(bins)
+
+lib/libdst2k.a: $(objs) 
+	xiar rcs lib/libdst2k.a $?
+
+clean:
+	-rm -f $(tildes) $(objs) $(bins) $(binobj)
+
+distclean: clean all
+
+$(bins): bin/%.run: src/%.o lib/libdst2k.a
+	$(cc) -fast -o $@ $< $(incs) $(libs)
+.c.o:
+	$(cc) $(DEBUG) -c -o $@ $< $(incs)

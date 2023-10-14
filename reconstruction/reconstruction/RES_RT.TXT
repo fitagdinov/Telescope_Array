@@ -1,0 +1,17 @@
+  // MC variables
+  Int_t    yymmdd;      // date
+  Int_t    hhmmss;      // time
+  Int_t    usec;        // event micro second
+  Int_t    nofwf;       // total number of waveforms in the readout
+  Int_t    parttype;    // Corsika particle type, proton=14, iron=5626
+  Int_t    corecounter; // Counter closest to core, useful in debugging
+  Double_t corexyz[3];  // 3D core position in CLF reference frame as given in Ben's MC, [cm]
+  Double_t height;      // Height of the first interaction, cm
+  Double_t mctheta;     // Zenith    angle, [Degree]
+  Double_t mcphi;       // Azimuthal angle, [Degree]
+  Double_t mcxcore;     // Core X position in SD coordinates, [1200m]
+  Double_t mcycore;     // Core Y position in SD coordinates, [1200m]
+  Double_t mcenergy;    // Energy in EeV
+  Int_t    mctc;        // Core clock count, as in Ben's MC
+  Double_t mcbdist;     // Distances from the SD edge for the thrown cores, [1200m]
+  Double_t mctdist;     // Distances from the T-shape boundary for the thrown cores, [1200m]

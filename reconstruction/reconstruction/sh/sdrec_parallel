@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+my_name=$(basename $0)
+sdrec=$(dirname $(readlink -f $0))/sdrec
+test ! -x $sdrec && echo "error: $sdrec executable not found!" >&2 && exit 2
+
+if [ $# -ne 4 -a $# -ne 3 ]; then
+    echo "">&2
+    echo "">&2
+    echo "TA SD Analysis, full chain">&2
+    echo "Author: Dmitri Ivanov <dmiivanov@gmail.com>">&2
+    echo "" >&2
+    echo "Execute TA SD analysis (sdrec) on multiple input dst files:" >&2
+    echo ""
+    echo "Usage: $my_name [file list] [N_threads] [prodir] [outdir]">&2
+    echo "(1): text file with the list of DST files" >&2
+    echo "(2): number of threads to run in parallel" >&2
+    echo "(3): processing directory for any partially completed work">&2
+    echo "(4): output directory for the results" >&2
+    echo "">&2
+    echo "Alternatively: $my_name [infile] [N_threads] [outdir]">&2
+    echo "(if you want the processing directory to be the same "\
+          "as the output directory)">&2
+    echo "(1): text file with the list of DST files" >&2
+    echo "(2): number of threads to run in parallel" >&2
+    echo "(3): output directory for the analysis results and any partial work" >&2
+    echo ""
+    echo ""
+    exit 2
+fi
+
+N=$2
+i=0
+
+filecont=$(cat $1)
+while IFS= read -r line
+do
+    ((i=i%N)); ((i++==0)) && wait
+    $sdrec $line $3 $4 &
+done < <(printf '%s\n' "$filecont")
+wait

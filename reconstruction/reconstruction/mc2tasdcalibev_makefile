@@ -1,0 +1,9 @@
+SHELL = /bin/bash
+
+
+$(if $(wildcard $(SDDIR)),,\
+	$(error The SDDIR ($(SDDIR)) variable is not properly set))
+include $(SDDIR)/makefileset.mk
+
+MC2TASDCALIBEV = $(shell pwd)
+include $(MC2TASDCALIBEV)/mc2tasdcalibev.mk

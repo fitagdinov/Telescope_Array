@@ -1,0 +1,165 @@
+        Documentation listing packet type and 
+        packet contents in raw dst files
+        ----------------------------------------
+Packet Format
+-------------
+                Each packet consists of up to 64 words. The
+                first word is the header, which contains the
+                packet id and the word count. The last word
+                is the header word repeated. In the case of
+                data packets, the penultimate word is a
+                checksum consisting of the exclusive or of
+                all the other words in the packet (including
+                or excluding both the header and tail -- 
+                figure it out.)
+
+                The header contains a 5-bit packet id in bits
+                8:C, a word count in bits 0:5, and a last
+                packet flag in bit F. A single unit of
+                information, for example the data from a 
+                single channel for a single event, can span
+                several packets. The last packet has the
+                last packet flag set. 
+
+Packet ID/name          Contents
+--------------  ----------------------------------
+ 3  Confirm     This packet is broadcast for any big
+                trigger, and also read out for any
+                confirmed trigger.
+                Word 0 -- Header (Bit 14 set if trigger confirmed)
+                Word 1 -- Mlink status word (a lot of status
+                          bits, sometimes useful for debugging.
+                          see mlink file lnkmem.inc for descript.)
+                Word 2 -- Trigger Number:
+                          bits 0:5 are the mirror ID
+                          bits 8:F are an 8-bit counter,
+                          kept separately for each mirror.
+                Word 3 -- M2 start address: where the event
+                          is stored on FADC boards.
+                Word 4 -- Low 16 bits of start time (10 MHz clock)
+                Word 5 -- Number of time bins stored.
+                Word 6 -- Trigger code: code word read from
+                          trigger PLD's on TRIG/HOST module --
+                          Bits 5:8 NV -- Vertical Coincidence bits
+                          Bits 9:C NH -- Horizontal Coincidences
+                          Bit 0: NH > 0 & NV > 0
+                          Bit 1: NH > 1 or NH > 1
+                          Bit 2: NH > 1 & NV > 1
+                          Bit 3: NH > 2 or NV > 2
+                          Bit 4: NH > 2 & NV > 2
+                          Note: Big triggers are typically defined
+                          as those with bit 2,3, or 4 set. Big
+                          triggers are broadcast.
+                          Note: Code = FFFF is an external trigger.
+                Word 7    Bits 14:29 of time of trigger
+                Word 8    Bits 30:45 of time of trigger               
+
+ 4  Data/Snapshots
+                Raw data is read out one slave at a time.
+                The first packet is a summary of scan information
+                for that slave. Subsequent packets contain the raw
+                data for each channel in which a hit was found.
+                In the case of snapshots (mirror id = 0 in trigger
+                number) the scan summary is followed by a single
+                packet per slave containing the means and variances
+                for each channel, but no raw data.
+                In the case of bigshots (mirror id = 63 in trigger
+                number) the full raw data is read out for each
+                channel regardless of whether a hit is found.
+    Scan packet:
+                Word 0 -- Header
+                Word 1 -- Trigger Number:
+                Word 2 -- FADC module ID
+                          bits 0:3 = Board number (0:F)
+                          bits 4:9 = Mirror number (1:42)
+                Word 3 -- M2 start address
+                
+                Word 4 -- bits 0:7  = channel number (only 1:256)
+                          (0:3 = slave, 4:7 = chan)
+                          bits 8:15 = filtered pulse height
+                                at maximum minus threshold
+                Word 5 -- m2 addr at pulse max - m2 start addr.
+                Words 6,7 -- same as 2,3 for 2nd hit
+
+    Snap packet: (mirror id = 0 in trigger number)
+                Word 0 -- Header
+                Word 1 -- Trigger Number
+                Word 2 -- Slave number (0:F)
+                Word 3 -- m2 start address
+                Word 4 -- mean * 256, chan 0
+                Word 5 -- variance (sigma**2) * 256, chan 0
+                Word 6:43 -- same for next 19 channels
+
+    Data packet:
+                Word 0 -- Header
+                Word 1 -- Trigger Number
+                Word 2 -- Channel number
+                Word 3 -- m2 start address
+                Word 4 -- number of data bytes
+                Word N-1 -- Checksum
+                Word N -- Header repeated
+
+ 5  Message
+                Word 0 -- Header
+                Word 1 -- Message word
+                          Bits 0:7 Module ID (encoding depends on message)
+                          Bits 8:F Message ID
+                          see message.inc in assembler code area
+                          or  message.h   in bank area for list of ID's
+                          see fpkt1_dst.c for full decoding of messages.
+                          also includes monitor messages saved in separate
+                          bank with bankid=MONITOR.
+                Word 2... Message packet
+
+ 6  Trigger     Word 0 -- Header
+                Word 1 -- Trigger Number
+                Word 2 -- Col trig pattern
+                Word 3 -- Row trig pattern
+                Word 4 -- Low 16 bits of start time (10 MHz clock)
+                Word 5 -- Number of time bins stored.
+                Word 6 -- Trigger code.
+                Word 7    Bits 14:29 of time of trigger
+                Word 8    Bits 30:45 of time of trigger               
+
+7  EndEvent 
+                Word 0 -- Header
+                Word 1 -- Trigger Number
+                Word 2 -- Mirror Number
+
+8  Test Packet    
+                Results of "test" command
+                run pedanal to decode.
+        
+9  Disable      Word 0 -- Header
+                Word 1 -- Mirror ID
+                Word 2 -- 13 bit m1 disable time
+                Word 3 -- next 16 bits of disable time
+                Word 4 -- next 16 bits of disable time
+
+10 Enable       Word 0 -- Header
+                Word 1 -- Mirror ID
+                Word 2 -- 13 bit m1 enable time
+                Word 3 -- next 16 bits of enable time
+                Word 4 -- next 16 bits of enable time
+
+12 GPS pkt
+                Includes 1 pulse per second measurements of 10 Mhz clock
+                as well as GPS serial information. See fpkt1_dst.c to decode.
+
+18  Data (Hit summary)
+                Word 0 -- Header
+                Word 1 -- Trigger Number
+                Word 2 -- Board ID (mirror Bits 4:7, slave Bits 0:3)
+                Word 3 -- m2 start address
+                Word 4 -- number of bins
+                Then, 3 words per hit for however many hits found: if
+                necessary, continues into next packet which will have
+                header, but not Words 1:4. First hit is:
+
+                Word 5 -- Bits 0:4 = chan, Bits 5:15 = start address
+                of hit (in clock cycles past m2 start address of evt)
+                Word 6 -- Pulse Area in FADC counts (ped subtracted)
+                Word 7 -- Pulse weighted mean time since start of hit.
+                
+                
+                

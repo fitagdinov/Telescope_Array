@@ -1,0 +1,12 @@
+
+cmake_minimum_required(VERSION 3.9)
+project(dst2rt_sd)
+
+
+# header files
+GLOB_FILES(dst2rt_sd_headers inc/*.h)
+file(COPY ${dst2rt_sd_headers} DESTINATION ${INCLUDE_OUTPUT_PATH})
+
+# binary file
+BINARY_FROM_SOURCES(SOURCES src/dst2rt_sd.cpp src/dst2rt_sd_util.cpp
+  LIBS sduti sdfdrt ${ROOT_LIBRARIES} dst2k ${BZIP2_LIBRARY} ${ZLIB_LIBRARY} m)
