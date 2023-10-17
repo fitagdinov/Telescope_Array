@@ -1,93 +1,60 @@
-import tenssorflow as tf
-def Generator_model(num="",noise_dim=200): 
-    input_tensor=tf.keras.Input(shape=(noise_dim,))
-    x=tf.keras.layers.Dense(units=200,use_bias=False)(input_tensor)
-    x=tf.keras.layers.BatchNormalization()(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    
-    x=tf.keras.layers.Dense(units=33*6,use_bias=False)(x)
-    x=tf.keras.layers.Dropout(rate=0.1)(x)
-    x=tf.keras.layers.BatchNormalization()(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    
-    x=tf.keras.layers.Reshape((33,6,1))(x)
-    
-    x=tf.keras.layers.Conv2DTranspose(128, (5,4), strides=(2,1), padding='same', use_bias=False,data_format='channels_last')(x)
-    x=tf.keras.layers.Dropout(rate=0.1)(x)
-    x=tf.keras.layers.BatchNormalization()(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    
-    x=tf.keras.layers.Conv2DTranspose(64, (5,2), strides=(2,1), padding='same', use_bias=False,data_format='channels_last')(x)
-    x=tf.keras.layers.Dropout(rate=0.1)(x)
-    x=tf.keras.layers.BatchNormalization()(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-#     print(x.shape)
-    x=tf.keras.layers.Conv2DTranspose(32, (5,2), strides=(2,1), padding='same', use_bias=False,data_format='channels_last')(x)
-    x=tf.keras.layers.Dropout(rate=0.1)(x)
-    
-    x=tf.keras.layers.AveragePooling2D((2,1),padding='same')(x)
-    x=tf.keras.layers.BatchNormalization()(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    
-#     x=tf.keras.layers.Conv2DTranspose(16, (5,1), strides=(2,1), padding='same', use_bias=False,data_format='channels_last')(x)
-#     x=tf.keras.layers.Dropout(rate=0.1)(x)
-#     x=tf.keras.layers.BatchNormalization()(x)
-#     x=tf.keras.layers.LeakyReLU()(x)
-    
-    x=tf.keras.layers.Conv2DTranspose(8, (5,2), strides=(2,1), padding='same', use_bias=False,data_format='channels_last')(x)
-    x=tf.keras.layers.Dropout(rate=0.1)(x)
-    x=tf.keras.layers.BatchNormalization()(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    x=tf.keras.layers.AveragePooling2D((2,1),padding='same')(x)
-    
-#     print(x.shape)
-    x=tf.keras.layers.Conv2D(1, (5,2), strides=(1,1), padding='same', use_bias=False,data_format='channels_last')(x)
-    x=tf.keras.layers.Dropout(rate=0.1)(x)
-    x=tf.keras.layers.BatchNormalization()(x)
-    x=tf.keras.activations.sigmoid(x)
-    x=tf.keras.layers.Cropping2D((2,2))(x) #change
-    x=tf.keras.layers.Reshape((128,2))(x)
+import tensorflow as tf
+import numpy as np
+import os
+import pandas as pd
+import tqdm
+import h5py
+import argparse
+import glob
+from metric import *
+gpus = tf.config.list_physical_devices('GPU')
+print(gpus)
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+def find_generator(path:str):
+    csv_name=glob.glob(path+'/*.csv')[0]
+    df=pd.read_csv(csv_name)
+    epoch=list(df[df.metric==df.metric.min()]['name'])[0]
+    epoch=epoch.replace('epoch_','ep')
+    return os.path.join(path+'/save_model/generator',epoch)
+def find_noise(path:str):
+    with open (os.path.join(path,'noise_fim.txt'),'r') as file:
+        noise=int(file.read())
+    return noise
+def metric_one_gen(path,disc_names,noise_dim,test):
+    all_metrics=np.zeros(4)
+    generator_name=find_generator(path)
+    generator=tf.keras.models.load_model(generator_name)
+    for i in range(4):
+        discriminator=tf.keras.models.load_model(disc_names[i])
+        try:
+            m=metric(generator,discriminator,test,noise_dim=noise_dim,batch=32,name=disc_names[i])
+            all_metrics[i]=m
+        except OSError:
+            m="Not found model"
+            all_metrics[i]=np.nan
+    with open (os.path.join(path,'all_metrics.txt'),'w') as file:
+        file.writelines('  '.join([str(metr) for metr in all_metrics]))
+    return (all_metrics,generator_name)
 
-    model= tf.keras.Model(input_tensor,x,name="Generator_model_{}".format(num))
-#     assert model.output_shape == (None, 128, 2, 1)
-    return model
-def Discriminator_model(num=''):
-    input_tensor=tf.keras.Input(shape=(128,2))
-    x= input_tensor
-    
-    x=tf.keras.layers.ZeroPadding1D(10)(x)
-#     x=tf.keras.layers.Conv1D(filters=32, kernel_size=(5), strides=(1), padding='same')(x)
-#     x=tf.keras.layers.LeakyReLU()(x)
-
-    x=tf.keras.layers.Conv1D(filters=32, kernel_size=(5), strides=(1), padding='same',name="first")(x)
-    x=tf.keras.layers.MaxPooling1D(2,padding='same')(x)
-    x=tf.keras.layers.Dropout(rate=0.2)(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    x=tf.keras.layers.Conv1D(filters=64, kernel_size=(5), strides=(1), padding='same')(x)
-    x=tf.keras.layers.MaxPooling1D(2,padding='same')(x)
-    x=tf.keras.layers.Dropout(rate=0.2)(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    
-    x=tf.keras.layers.Conv1D(filters=64, kernel_size=(5), strides=(1), padding='same')(x)
-    x=tf.keras.layers.MaxPooling1D(2,padding='same')(x)
-    x=tf.keras.layers.Dropout(rate=0.2)(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    
-    x=tf.keras.layers.Conv1D(filters=64, kernel_size=(5), strides=(1), padding='same')(x)# kern=4
-    x=tf.keras.layers.MaxPooling1D(2,padding='same')(x)
-    x=tf.keras.layers.Dropout(rate=0.2)(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    
-    x=tf.keras.layers.Conv1D(filters=128, kernel_size=(5), strides=(1), padding='same')(x)# kern=4
-    x=tf.keras.layers.MaxPooling1D(2,padding='same')(x)
-    x=tf.keras.layers.Dropout(rate=0.2)(x)
-    x=tf.keras.layers.LeakyReLU()(x)
-    
-    x=tf.keras.layers.Flatten()(x)
-    x=tf.keras.layers.Dropout(rate=0.1)(x)
-
-    x=tf.keras.layers.Dense(units=100,activation='relu')(x)
-    x=tf.keras.layers.Dense(units=1)(x)
-    
-    model= tf.keras.Model(input_tensor,x,name="Discriminator_model_num_{}".format(num))
-    return model
+if __name__=='__main__':
+    parser = argparse.ArgumentParser(description='validation')
+    parser.add_argument('-path','--main_path', type=str, help='main_path')
+    args = parser.parse_args()
+    main_path=args.main_path
+    train,test= return_data()
+    all_path=glob.glob(main_path+'/*')
+    disc_names=[i+'/save_model/discriminator/ep29' for i in all_path]
+    generator_path=all_path.copy()
+    mean_metric_dict={}
+    print(generator_path)
+    for path in generator_path:
+        noise_dim=find_noise(path)
+        m,generator_name=metric_one_gen(path,disc_names,noise_dim,test)
+        mean_metric=m.mean()
+        mean_metric_dict[generator_name]=mean_metric
+    df=pd.DataFrame([mean_metric_dict])
+    df.to_csv(main_path+'/mean_metric.csv')
+        
+        
+        
