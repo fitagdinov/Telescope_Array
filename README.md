@@ -1,5 +1,6 @@
-
-# Abstract
+# Generation of the ground detectors readings of the Telescope Array experiment
+and the search for anomalies using neural networks
+## Abstract
 We report on the development of neural networks for generating readings of Telescope Array’s
 surface detectors with the largest registered integral signal. To achieve this goal, we implemented
 generative Waserstein adversarial networks with gradient penalty. The data used to train the model
