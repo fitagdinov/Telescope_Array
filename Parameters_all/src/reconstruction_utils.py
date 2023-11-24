@@ -114,7 +114,14 @@ def find_angles(sol):
     theta=tf.math.acos(cos_theta)
     return tf.expand_dims(theta,-1),tf.expand_dims(phi,-1)
 def eta_fun(theta):
-    return 3.97-1.79*(1/tf.math.cos(theta)-1)
+    x=theta*180/3.14
+    
+    e1 = 3.97 - 1.79*(tf.math.abs(1.0/tf.math.cos(theta)) - 1.0)
+    e2 = ((((((-1.71299934e-10*x + 4.23849411e-08)*x -3.76192000e-06)*x
+               + 1.35747298e-04)*x -2.18241567e-03)*x + 1.18960682e-02)*x
+             + 3.70692527e+00)
+    res = tf.where(x<62.7,e1,e2)
+    return res
 
 def s_profile_tasimple(r_ta,theta):
     #change constant
@@ -123,34 +130,34 @@ def s_profile_tasimple(r_ta,theta):
     eta=eta_fun(theta)# batch,1,1
     eta=tf.repeat(eta,6,axis=1)
     eta=tf.repeat(eta,6,axis=2)
-    Rm = tf.constant(90e-3,dtype=tf.float32)
-    R1 = tf.constant(1000e-3,dtype=tf.float32)
+    Rm = tf.constant(0.09,dtype=tf.float32)
+    R1 = tf.constant(1,dtype=tf.float32)
     return (tf.math.pow((r/Rm),-1.2)*tf.math.pow((1+r/Rm), -(eta-1.2))*tf.math.pow(1+(tf.math.pow(r,2)/R1/R1),-0.6))
 def s_profile(r_ta, theta,r_plane):
     #r_ta shape batch,6,6
     # заменить r_plane на r_X 
     f800=s_profile_tasimple(expand_dims(tf.constant(0.8)), theta)
 #     f800=tf.repeat(f800,r_ta.shape[0],0)
-    print(s_profile_tasimple(r_ta, theta))
-    return s_profile_tasimple(r_ta, theta)/s_profile_tasimple(r_plane, theta)
+    return s_profile_tasimple(r_ta, theta)/f800
 
-def s_s_pfs___s_s_pps(data,theta_,phi_,tf_type=tf.float32):
+def s_s_pfs___s_s_pps(data,theta_,phi_,r_core,tf_type=tf.float32):
     mask=data[:,:,:,3]
     theta=tf.expand_dims(theta_,-1)
     phi=tf.expand_dims(phi_,-1)
     signal=data[:,:,:,0]*mask
     s_s_pfs=tf.reduce_sum(signal,axis=(1,2))
-    
-    
+
     x=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),0),6,axis=0),tf_type)
-    y=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),1),6,axis=1),tf_type)
-    
+    y=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),1),6,axis=1),tf_type)    
     x=tf.repeat(tf.expand_dims(x,0),len(data),0)*dist
     y=tf.repeat(tf.expand_dims(y,0),len(data),0)*dist
-    
-    print(x.shape,phi.shape)
-    №
-    r_plane=tf.math.sin(theta)*(tf.math.cos(phi)*x + tf.math.sin(phi*y))
+    # change robert
+    # ADD r_core 
+    r_core_x=expand_dims(r_core[:,0])
+    r_core_y=expand_dims(r_core[:,1])
+    x=x-r_core_x
+    y=y-r_core_y
+    r_plane=tf.math.sin(theta)*(tf.math.cos(phi)*(x) + tf.math.sin(phi)*(y))
     r=tf.math.sqrt(tf.math.pow(x,2)+tf.math.pow(y,2)-tf.math.pow(r_plane,2))
     #change eta
     s_s_pps=tf.reduce_sum(s_profile(r,theta,r_plane),axis=(1,2))
@@ -158,11 +165,22 @@ def s_s_pfs___s_s_pps(data,theta_,phi_,tf_type=tf.float32):
 def S_X_fun(s_s_pfs, s_s_pps):
     res=tf.where(s_s_pps>1e-10,s_s_pfs/s_s_pps,1)
     return res
+def place_reconstraction(sol,mask,x,y):
+#     mask=tf.cast(data[:10,:,:,3],tf_type)
+#     x=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),0),6,axis=0),tf_type)
+#     y=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),1),6,axis=1),tf_type)
+#     mask=tf.reshape(mask,(len(data[:5]),-1))
+#     x=tf.repeat(tf.expand_dims(x,0),len(data[:10]),0)
+#     y=tf.repeat(tf.expand_dims(y,0),len(data[:10]),0)
+#     print(x.shape,expand_dims(sol[:,0,0]).shape)
+    t_pl=x*expand_dims(sol[:,0,0])+y*expand_dims(sol[:,1,0])+expand_dims(sol[:,2,0])
+    return t_pl
 
 def a_ivanov_fun(theta):
     DEG=180*pi
     threshold1=25/DEG
     threshold2=35/DEG
+    # переписать для обнавления масива
     res1=tf.where(theta<threshold1,3.3836 - 0.01848*theta/DEG,0)
     res3=tf.where(theta>threshold2,tf.math.exp(-3.2e-2*theta/DEG + 2.0),0)
     a=(0.6511268210e-4*(theta/DEG-0.2614963683))*(theta/DEG*theta/DEG-134.7902422*theta/DEG+4558.524091)
@@ -170,11 +188,9 @@ def a_ivanov_fun(theta):
     return res1+res2+res3
 def courve_fun(a_ivanov,S_X):
     return a_ivanov*1.3/tf.math.sqrt(tf.expand_dims(S_X,-1))
-def final_courve(data,theta,phi):
-    s_s_pfs, s_s_pps=s_s_pfs___s_s_pps(data,theta,phi)
-    print( s_s_pfs.shape, s_s_pps.shape)
+def final_courve(data,theta,phi,r_core):
+    s_s_pfs, s_s_pps=s_s_pfs___s_s_pps(data,theta,phi,r_core)
     S_X=S_X_fun(s_s_pfs, s_s_pps)
-    print(S_X.shape,'S_X')
     a_ivanov=a_ivanov_fun(theta)
     courve=courve_fun(a_ivanov,S_X)
     return courve
@@ -184,50 +200,73 @@ def desaturate(S):
     #(S>200)?(exp(log(200)*(-0.7/0.3)+log(S)*1/0.3)):S;
     res=tf.where(S>200,tf.math.exp(math.log(200)*(-0.7/0.3)+tf.math.log(S)*1/0.3),S)
     return res
-def chi_2_optimisation(data,alpha=0.1,iterats=20,tf_type=tf.float32):
+def chi_2_optimisation(data,alpha=0.001,iterats=200,tf_type=tf.float32):
     r_core=xy_core(data)
     sol=time_roconstruction(data)
     theta,phi=find_angles(sol)
     t0=t0_fun(r_core,sol)
-    courve=final_courve(data,theta,phi)
+    courve=final_courve(data,theta,phi,r_core)
     aprime=courve
-    params=tf.concat([t0,theta,phi,aprime],axis=1)
-    print(params.shape,'params')
-    print(params)
-#     params=tf.Variable([t0,theta,phi,aprime])
+    print('theta',theta.shape,'aprime',aprime.shape)
+#     params=tf.concat([t0,theta,phi,aprime],axis=1)
     
+    params=tf.concat([sol[:,:,0],aprime],axis=1)
+    chi2T_list=[]
 
-    for i in range(iterats):
-#         with tf.GradientTape() as gr:  
-#             gr.watch(params)
+    for i in tqdm.tqdm(range(iterats)):
+        with tf.GradientTape() as gr:  
+            #init params for find grad
             
-        #chi2 bloke
-        n=tf.concat([tf.math.cos(phi),tf.math.sin(phi)],axis=1)*tf.math.sin(theta)
-        real_time=tf.cast(data[:,:,:,2],tf_type)+tf.cast(data[:,:,:,1],tf_type)
-        mask=tf.cast(data[:,:,:,3],tf_type)
-        x=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),0),6,axis=0),tf_type)
-        y=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),1),6,axis=1),tf_type)
-        mask=tf.reshape(mask,(len(data),-1))
-        x=tf.repeat(tf.expand_dims(x,0),len(data),0)*dist
-        y=tf.repeat(tf.expand_dims(y,0),len(data),0)*dist
-        r_core_66=tf.expand_dims(tf.expand_dims(r_core,2),3) #(10, 2, 1, 1)
-        r_pl=(x-r_core_66[:,0])*tf.expand_dims(tf.expand_dims(n[:,0],-1),-1)+(y-r_core_66[:,1])*tf.expand_dims(tf.expand_dims(n[:,1],-1),-1)
-#             print('r',tf.math.pow(x,2)+tf.math.pow(y,2)-tf.math.pow(r_pl,2))
-        r=tf.math.sqrt(tf.math.pow(x,2)+tf.math.pow(y,2)-tf.math.pow(r_pl,2))
-        r=tf.where(tf.math.is_nan(r),0,r)
-        s_prof=s_profile(r,tf.expand_dims(theta,-1),r_pl) #LDF
-        td=tf.expand_dims(aprime,-1)*linsley_t(r,s_prof)
+            gr.watch(params)
+            t0=tf.expand_dims(params[:,0],-1)
+            theta=params[:,1]
+            phi=params[:,2]
+#             print('bbefor',theta.shape,phi.shape)
+            aprime=tf.expand_dims(params[:,3],-1)
 
-        # КАК В СТАТЬЕ
+            sol=tf.expand_dims(params[:,:3],-1)
+            
+#             print('1_sol',sol.shape)
+            theta,phi=find_angles(sol)
+            theta=theta[:,0]
+            phi=phi[:,0]
+            aprime=tf.expand_dims(params[:,3],-1)
+#             print('after',theta.shape,phi.shape)
+            real_time=tf.cast(data[:,:,:,2],tf_type)+tf.cast(data[:,:,:,1],tf_type)
+            mask_or=tf.cast(data[:,:,:,3],tf_type)
+            mask=tf.reshape(mask_or,(len(data),-1))
 
-        r_dist=r_pl
-        print(s_prof(r_dist,theta).shape)
-        td=tf.expand_dims(aprime,-1)*s_prof(r_dist,theta)*tf.math.pow((1+r/R_L),1.5)
+            # from s_s_pfs___s_s_pps
+            x=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),0),6,axis=0),tf_type)
+            y=tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),1),6,axis=1),tf_type)    
+            x=tf.repeat(tf.expand_dims(x,0),len(data),0)*dist
+            y=tf.repeat(tf.expand_dims(y,0),len(data),0)*dist
+            # change robert
+            theta_=expand_dims(theta)
+            phi_=expand_dims(phi)
+            r_core_x=expand_dims(r_core[:,0])
+            r_core_y=expand_dims(r_core[:,1])
+            x=x-r_core_x
+            y=y-r_core_y
+            r_plane=tf.math.sin(theta_)*(tf.math.cos(phi_)*(x) + tf.math.sin(phi_)*(y))
+            r=tf.math.sqrt(tf.math.pow(x,2)+tf.math.pow(y,2)-tf.math.pow(r_plane,2))
+            LDF=s_profile(r,theta_,r_plane)
+            td=tf.expand_dims(aprime,-1)*linsley_t(r,LDF)
 
-        print('t_d',td)
-        # КОНЕЦ
-        return s_profile_tasimple(r_pl, tf.expand_dims(theta,-1))[0]
-#             chi_T=tf.reduce_sum(tf.math.pow((tf.expand_dims(t0,-1)+r_pl+td-real_time),2)/t_sigma2,axis=(1,2))
+            # ПРОВЕРИТЬ ПО СТАТЬЕ
+            # КОНЕЦ
+
+            # ПЛОСКИЙ ФРОНТ КАК ВЫВЕЛИ
+            t_pl=place_reconstraction(sol,mask,x,y)
+#             chi_T=tf.reduce_sum(tf.math.pow((tf.expand_dims(t0,-1)+r_plane+td-real_time),2)/t_sigma2,axis=(1,2))
+            
+            chi_T=tf.reduce_sum(tf.math.pow((t_pl+td-real_time)*mask_or,2)/t_sigma2,axis=(1,2))
+            grad=gr.gradient(chi_T,params)
+            params=params-alpha*grad
+#             print('chi_T',chi_T)
+            chi2T_list.append(chi_T)
+
+        
             
 #             # for no geometry fit
 # #             s_s_pfs, s_s_pps=s_s_pfs___s_s_pps(data)
@@ -239,7 +278,6 @@ def chi_2_optimisation(data,alpha=0.1,iterats=20,tf_type=tf.float32):
 # #             chi_L1=tf.reduce_sum(tf.math.pow(0.25*(x - s_fit),2)/s_sigma2,axis=(1,2))
             
 #             print(chi_T)
-#         grad=gr.gradient(chi_T,params)
-#         print(grad)
-#         params=params-alpha*grad
-#         print(chi_T)
+    chi2T_list=np.array(chi2T_list)
+    return chi2T_list,params
+# chi2T_list,params=chi_2_optimisation(data[:10])
