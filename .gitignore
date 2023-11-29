@@ -2,4 +2,5 @@ nohup.out
 Parameters_all/Models
 mk_all_old.h5
 Parameters_all/.ipynb_checkpoints
-max_impuls/mc_wfmax_norm.h5
+/max_impuls/mc_wfmax_norm.h5
+/__pycache__/

@@ -88,6 +88,9 @@ def func_chunks_generators(lst, n):
         for i in range(0, len(lst), n):
              l.append(lst[i : i + n])
         return(l)
+# def amplitude(data):
+#     # shape -1 128 2
+#     return 
 def metric(generator,discriminator,data,noise_dim,batch=64,k_rd=0.0001,name='???'):
     m=np.array([])
     data_list=func_chunks_generators(data,batch)
@@ -101,7 +104,7 @@ def metric(generator,discriminator,data,noise_dim,batch=64,k_rd=0.0001,name='???
         L_D=Discriminator_loss(image, fake,discriminator)*k_rd
         loss=L_R+L_D
         m=np.append(m,loss)
-    return m.mean()
+    return m
 
 
 
@@ -120,7 +123,7 @@ if __name__=="__main__":
         main_dir=args.main_dir
         discriminator=os.path.join(main_dir,'save_model/discriminator/ep20')
         discriminator=tf.keras.models.load_model(discriminator)
-        generator=os.path.join(main_dir,'save_model/generator')
+        generators=os.path.join(main_dir,'save_model/generator')
         save=os.path.join(main_dir,'metric_for_epochs.csv')
     else:
         discriminator=tf.keras.models.load_model(args.discriminator)
@@ -128,13 +131,14 @@ if __name__=="__main__":
         save=args.save
     df=pd.DataFrame(columns=['name','metric'])
     noise_dim=args.noise_demention
-    num_ep=len(os.listdir(generator))
+    num_ep=len(os.listdir(generators))
     print("____start____")
     for ep in tqdm.tqdm(range(num_ep-1,-1,-args.epoch_step),'calculate metrics'):
         print('epoch is ',ep)
         try:
-            generator=tf.keras.models.load_model(os.path.join(generator,'ep'+str(ep)))
-            m=metric(generator,discriminator,test,noise_dim=noise_dim,batch=32,name='ep'+str(ep))
+            generator=tf.keras.models.load_model(os.path.join(generators,'ep'+str(ep)))
+            m_full=metric(generator,discriminator,test,noise_dim=noise_dim,batch=32,name='ep'+str(ep))
+            m=m_full.mean()
         except OSError:
             m="Not found model"
         df_new=pd.DataFrame([['epoch_'+str(ep),m]],columns=['name','metric'])
