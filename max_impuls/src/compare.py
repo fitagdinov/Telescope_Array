@@ -24,24 +24,32 @@ def train_small(train,weights,threshold=0.2,step=0.05):
                 if random.random()<1/weights[i]:
                     train_small_list.append(train_one)
     return train_small_list
-
+def get_energy(f,name):
+    ev_params=f[name]['ev_params'].value
+    energy=ev_params[:,5]
+    return energy
 def get_data(data_name,num_test=2000):
     train=np.zeros((0,128,2))
     test=np.zeros((0,128,2))
+    train_energy=np.zeros((0))
+    test_energy=np.zeros((0))
     with h5py.File(file_name,'r') as f:
         for name in data_name:
             data=f[name]['wf_max'].value
             data=(data-data.min())/data.max()
+            energy=get_energy()
             n=int(data.shape[0]*n_test)
             train=np.concatenate([train,data[:n]],axis=0)
+            train_energy=np.concatenate([train_energy,energy[:n]],axis=0)
             test=np.concatenate([test,data[n:]],axis=0)
+            test_energy=np.concatenate([test_energy,energy[n:]],axis=0)
     train_huge=train[train.max(axis=1).max(axis=1)>0.2]
 #     train_small_list=train_small(train,weights=np.array([1.12229e+05, 1.12466e+05, 5.40300e+04, 3.83330e+04])/ 2.94010e+04,threshold=0.2,step=0.05)   
 #     train=np.append(train_small_list,train_huge,axis=0)
 #     train=train_huge
 #     np.random.shuffle(train)
 #     train.shape
-    return (train_huge,test[:num_test])
+    return (train_huge,test[:num_test],train_energy,test_energy)
 def amplitude(data):
     # shape -1 128 2
     return data.max(axis=(1,2))
