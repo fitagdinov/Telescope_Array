@@ -10,8 +10,8 @@ import argparse
 np.random.seed=42
 file_name='../../mc_hadrons_qgs34_0010.h5'
 trainable=['pr-q4-9yr']
-# not_trainable=['pr-q3-9yr']
-not_trainable=['sddata_9yr']
+not_trainable=['fe-q4-9yr']
+# not_trainable=['sddata_9yr']
 print('trainable',trainable)
 print('not_trainable',not_trainable)
 n_test=0.8
@@ -35,8 +35,6 @@ def get_data(data_name,num_test=2000):
             n=int(data.shape[0]*n_test)
             train=np.concatenate([train,data[:n]],axis=0)
             test=np.concatenate([test,data[n:]],axis=0)
-    np.random.shuffle(train)
-    np.random.shuffle(test)
     train_huge=train[train.max(axis=1).max(axis=1)>0.2]
 #     train_small_list=train_small(train,weights=np.array([1.12229e+05, 1.12466e+05, 5.40300e+04, 3.83330e+04])/ 2.94010e+04,threshold=0.2,step=0.05)   
 #     train=np.append(train_small_list,train_huge,axis=0)
@@ -73,7 +71,7 @@ def main(disc_path,gen_path,noise_dim,save):
     df=pd.DataFrame(columns=['name','metric'])
     print("____start____")
     m_full_train,ampl_full_train=metric_main(generator,discriminator,train,noise_dim=noise_dim,batch=128,name='train')
-    m_full_test,ampl_full_test=metric_main(generator,discriminator,train,noise_dim=noise_dim,batch=128,name='test')
+    m_full_test,ampl_full_test=metric_main(generator,discriminator,test,noise_dim=noise_dim,batch=128,name='test')
     train_name='_'.join(trainable)
     test_name='_'.join(not_trainable)
     df = pd.DataFrame(columns=[f'train__{train_name}__mertic',f'train__{train_name}__ampl',
