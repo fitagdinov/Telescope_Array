@@ -1,6 +1,6 @@
 */nohup.out
 Parameters_all/Models
-/mk_all_old.h5
+mk_all_old.h5
 Parameters_all/.ipynb_checkpoints
 /max_impuls/mc_wfmax_norm.h5
 */__pycache__/
@@ -9,3 +9,8 @@ max_impuls/Notebooks/.ipynb_checkpoints/
 Parameters_all/.ipynb_checkpoints/
 max_impuls/base_models/
 max_impuls/src/__pycache__/
+max_impuls/.ipynb_checkpoints/ Parameters_all/.ipynb_checkpoints/ reconstruction/.ipynb_checkpoints/
+Parameters_all/.ipynb_checkpoints/*
+nohup.out
+Parameters_all/Notebooks/.ipynb_checkpoints/main_parameters-checkpoint.ipynb Parameters_all/Notebooks/.ipynb_checkpoints/rewrite_reconstruction-checkpoint.ipynb Parameters_all/Notebooks/.ipynb_checkpoints/ta_reco-checkpoint.ipynb Parameters_all/Notebooks/.ipynb_checkpoints/ta_reco_chi2_tq-checkpoint.ipynb
+mc_hadrons_qgs34_0010.h5
