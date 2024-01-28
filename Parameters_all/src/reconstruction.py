@@ -13,7 +13,8 @@ s_max = tf.constant([[1.8]],dtype=tf.float32)
 t_err_res=tf.constant(c/1e6,dtype=tf.float32)#
 t0_err=tf.constant(30,dtype=tf.float32)#
 dist=tf.constant(1.2,dtype=tf.float32)
-
+tf_type = tf.float32
+R_error = 0.15
 def init(data,tf_type = tf.float32):
     data=tf.cast(data,tf_type)
     mask = tf.expand_dims(data[:,:,:,3],-1)
@@ -24,27 +25,17 @@ def init(data,tf_type = tf.float32):
     real_time = tf.cast(self.real_time,self.tf_type)
     mask = tf.cast(self.mask,self.tf_type)
     batch = data.shape[0]
-#     self.t0 = None
-#     self.theta = None
-#     self.detertors_coord = None
-#     self.core = None
-#     self.t_place = None
-#     self.courve = None
-#     self.R_error = 0.15
-#     self.S_X=None
-#     self.LDF=None
-def detectors_init():
-    x = tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),0),6,axis=0),self.tf_type)
-    y = tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),1),6,axis=1),self.tf_type)
+def detectors_init(data):
+    batch = data.shape[0]
+    x = tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),0),6,axis=0),tf_type)
+    y = tf.cast(tf.repeat(tf.expand_dims(tf.range(0,6),1),6,axis=1),tf_type)
     x = tf.expand_dims(x,-1)
     y = tf.expand_dims(y,-1)
     # x.shape = (6,6,1)
-    detectors = tf.concat([x,y],axis=-1) * self.dist
-    detectors = tf.repeat(tf.expand_dims(detectors,0),self.batch,0)
-    self.detertors_coord=detectors
+    detectors = tf.concat([x,y],axis=-1) * dist
+    detectors = tf.repeat(tf.expand_dims(detectors,0),batch,0)
     return detectors
-def core_(signal):
-    detectors = detectors_init() # shape (batch,6,6,2)
+def core_(detectors,signal):# shape (batch,6,6,2)
     sum_signal=tf.reduce_sum(signal,axis=(1,2)) # shape (batch ,1)
     core=tf.reduce_sum(detectors * signal, axis=(1,2))/sum_signal
     return core
@@ -62,9 +53,9 @@ def create_matrix(x,y,t,mask):
     a3=tf.concat([a13,a23,a33],axis=2)
     A=tf.concat([a1,a2,a3],axis=1)
 
-    b1=self.expand_dims(tf.reduce_sum(x*t,axis=1))
-    b2=self.expand_dims(tf.reduce_sum(y*t,axis=1))
-    b3=self.expand_dims(tf.reduce_sum(t,axis=1))
+    b1=expand_dims(tf.reduce_sum(x*t,axis=1))
+    b2=expand_dims(tf.reduce_sum(y*t,axis=1))
+    b3=expand_dims(tf.reduce_sum(t,axis=1))
     b=tf.concat([b1,b2,b3],axis=1)
     return A,b
 def place_sol(detectors,real_time,mask):
@@ -76,7 +67,7 @@ def place_sol(detectors,real_time,mask):
     A,b=create_matrix(x,y,t,mask)
     return tf.linalg.solve(A,b)
 def place_params(detectors,real_time,mask):
-    sol = self.place_sol(detectors,real_time,mask)
+    sol = place_sol(detectors,real_time,mask)
     #t_0=b+(r_cor;n)
     b=sol[:,2:,0]
     n=sol[:,:2,0]
@@ -99,7 +90,7 @@ def place_params(detectors,real_time,mask):
 def detectors_core(detectors,core):
     detectors_c=detectors-tf.reshape(core,(-1,1,1,2))
     return detectors_c
-def place_reconstruction(detectors,real_time,mask,t0,theta,phi):
+def place_reconstruction(detectors,mask,t0,theta,phi):
 #     t0,theta,phi = place_params(detectors,real_time,mask)
     t0=expand_dims(t0) # shape (batch,1,1,1)
     theta=expand_dims(theta)
@@ -132,10 +123,10 @@ def s_profile(r_ta, theta):
     #r_ta shape batch,6,6
     f800=s_profile_tasimple(expand_dims(tf.constant(0.8)), theta)
     return s_profile_tasimple(r_ta, theta)/f800
-def pfs__pps(detectors,core,t0,theta,phi,signal):
+def pfs__pps(detectors,core,t0,theta,phi,signal,mask):
 #     t0,theta,phi = self.place_params()
     # u can read from t_place if in place_reconstruction use core shift
-    detectors = detectors_core(detectors,core)
+#     detectors = detectors_core(detectors,core)
     t0=expand_dims(t0) # shape (batch,1,1,1)
     theta=expand_dims(theta)
     phi = expand_dims(phi)
@@ -159,14 +150,15 @@ def a_ivanov_fun(theta):
     res2=tf.where(tf.math.logical_and(theta > threshold1,theta < threshold2),a,0)
     return res1+res2+res3
     
-def courve_fun(detectors,core,t0,theta,phi,signal):
+def courve_fun(detectors,core,t0,theta,phi,signal,mask):
     a_ivanov = a_ivanov_fun(theta)
-    pfs,pps = pfs__pps()
+    pfs,pps = pfs__pps(detectors,core,t0,theta,phi,signal,mask)
     S_X = tf.where(pps>1e-10,pfs/pps,1)[:,0]
+    S_X=tf.expand_dims(S_X,-1)
+    courve = a_ivanov*1.3/tf.math.sqrt(S_X)
+    courve = courve
 #     S_X=tf.expand_dims(S_X,-1)
-    courve = tf.expand_dims(a_ivanov*1.3/tf.math.sqrt(S_X),axis=-1)
-    self.courve = courve
-    return courve
+    return courve,S_X
 def linsley_t(r,S):
     return 0.67*tf.math.pow((1 + r/LINSLEY_r0), 1.5)*tf.math.pow(S, -0.5)/1e3
 def courve_reconstruction(detectors,t0,theta,phi,courve):
@@ -178,10 +170,10 @@ def courve_reconstruction(detectors,t0,theta,phi,courve):
     n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta)],axis=-1)
     t_place = detectors[:,:,:,1:2]*n[:,:,:,0:1] + detectors[:,:,:,0:1]*n[:,:,:,1:2]
     dist_core = tf.expand_dims(tf.reduce_sum(tf.math.pow(detectors,2),axis=-1),axis=-1) - tf.math.pow(t_place,2)
-    dist_core = tf.where(dist_core>self.R_error*self.R_error,tf.math.sqrt(dist_core),self.R_error)
+    dist_core = tf.where(dist_core>R_error*R_error,tf.math.sqrt(dist_core),R_error)
     LDF=s_profile(dist_core,theta)
-    td=expand_dims(courve)*linsley_t(dist_core,LDF)/self.NSEC
-    return td
+    td=expand_dims(courve)*linsley_t(dist_core,LDF)/NSEC
+    return td,LDF
 def logPua(n,nbar):
     print(n.shape,nbar.shape)
     last_part = 2*(n*tf.math.log(nbar/(n+1e-8)) + (n - nbar))
@@ -210,26 +202,23 @@ def chi2L(S_X,s_prof,mask,signal):
     return chi2L2  #+ chi3L
 def optimization(data,iterats,num):
     Adam = tf.keras.optimizers.Adam()
-    signal = data[:,:,:,0]
-    real_time = data[:,:,:,1]+data[:,:,:,2]
-    mask=data[:,:,:,3]
+    signal = data[:,:,:,0:1]
+    real_time = data[:,:,:,1:2]+data[:,:,:,2:3]
+    mask=data[:,:,:,3:4]
     
     #detectors
-    detectors = detectors_init()
-    self.core_()
-    self.place_sol()
+    detectors_orig  = detectors_init(data)
+    core = core_(detectors_orig ,signal)
+    detectors = detectors_core(detectors_orig ,core)
+    t0,theta,phi = place_params(detectors,real_time,mask)
     # ??? don't work without that 
-    pfs,pps= rec.pfs__pps()
-    rec.courve_fun()
+#     pfs,pps= pfs__pps(detectors,core,t0,theta,phi,signal)
+    courve,S_X = courve_fun(detectors,core,t0,theta,phi,signal,mask)
     chi_list=[]
-    self.place_params()
-    t0=self.t0
-    theta=tf.expand_dims(self.theta,-1)
-    phi=tf.expand_dims(self.phi,-1)
-    core = self.core
-    courve= self.courve
-    S_X = self.S_X
-#         print(S_X)
+#     t0=t0
+#     theta=tf.expand_dims(theta,-1)
+#     phi=tf.expand_dims(phi,-1)
+    print(t0.shape,theta.shape,phi.shape,courve.shape,core.shape,S_X.shape)
     par = [t0,theta,phi,courve,core,S_X]
     params=[tf.Variable(p, True) for p in par]
 #         params=tf.concat([t0,theta,phi,courve,core,S_X],axis=1)
@@ -238,66 +227,27 @@ def optimization(data,iterats,num):
     for i in tqdm.notebook.tqdm_notebook(range(iterats)):
         with tf.GradientTape() as gr:  
             gr.watch(params)
-#                 self.t0=params[:,0:1]
-#                 self.theta=params[:,1:2]
-#                 self.phi=params[:,2:3]
-#                 self.courve=params[:,3:4]
-#                 self.core=params[:,4:6]
-#                 self.S_X=params[:,6:7]
-
-#                 t0=params[:,0:1]
-#                 theta=params[:,1:2]
-#                 phi=params[:,2:3]
-#                 courve=params[:,3:4]
-#                 core=params[:,4:6]
-#                 S_X=params[:,6:7]
-
-            # for list
-            self.t0=params[0]
-            self.theta=params[1]
-            self.phi=params[2]
-            self.courve=params[3]
-            self.core=params[4]
-            self.S_X=params[5]
-
+            
             t0=params[0]
             theta=params[1]
             phi=params[2]
             courve=params[3]
             core=params[4]
             S_X=params[5]
-            t_place = self.place_reconstruction_static(t0,theta,phi,core)
-            td,LDF = self.courve_reconstruction_static(t0,theta,phi,courve,core)  #update LDF <==> s_profile
-            t_sigma2=(self.t0_err*self.t0_err + td*td) * self.t_err_res
+            detectors = detectors_core(detectors_orig ,core)
+            t_place = place_reconstruction(detectors,mask,t0,theta,phi)
+            td,s_prof = courve_reconstruction(detectors,t0,theta,phi,courve)  #update LDF <==> s_profile
+            t_sigma2=(t0_err*t0_err + td*td) * t_err_res
             time_reco = t_place +td
-            chi_T=tf.reduce_sum(tf.math.pow((time_reco-self.real_time)*self.mask,2)/t_sigma2,axis=(1,2))
-            chi_L=self.chi2L(S_X,LDF)
+            chi_T=tf.reduce_sum(tf.math.pow((time_reco-real_time)*mask,2)/t_sigma2,axis=(1,2))
+            chi_L=chi2L(S_X,s_prof,mask,signal)
             chi = chi_T +chi_L
-
 #                 print(tf.reduce_mean(chi_T),tf.reduce_mean(chi_L),end='\r')
-            if num:
-                print(chi_T[num],chi_L[num],[np.array(i[num]) for i in params],end='\r')
+#             if num:
+#                 print(chi_T[num],chi_L[num],[np.array(i[num]) for i in params],end='\r')
             chi_list.append(chi)
             grad=gr.gradient(chi,params)
-#                 grad = grad* tf.constant()
-#                 print(grad)
-#                 print('grad',[i[25] for i in grad])
             Adam.apply_gradients(zip(grad, params))
-#                 params=params-alpha*grad
-            # updating
-#                 self.t0=params[:,0:1]
-#                 self.theta=params[:,1:2]
-#                 self.phi=params[:,2:3]
-#                 self.courve=params[:,3:4]
-#                 self.core=params[:,4:]
-#                 self.S_X=params[:,6:7]
-            # for list
-            self.t0=params[0]
-            self.theta=params[1]
-            self.phi=params[2]
-            self.courve=params[3]
-            self.core=params[4]
-            self.S_X=params[5]
             params_list.append(params)
     for s1,p1 in enumerate(params_list):
         p2=tf.concat(p1,axis=1)
