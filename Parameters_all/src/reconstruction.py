@@ -6,7 +6,7 @@ dist=tf.constant(1.2,dtype=tf.float32)# min dist between 2 detectors in km
 c=tf.constant(299792.458,dtype=tf.float32)# # km\s
 NSEC= tf.constant(1e9/c,dtype=tf.float32)# in rubsov's code is a time for 1.2 km 1.2/c*1e9
 R_L=tf.constant(30e-3,dtype=tf.float32)#
-LINSLEY_r0=tf.constant(0.025,dtype=tf.float32)#
+LINSLEY_r0=tf.constant(0.030,dtype=tf.float32)#
 DET_AREA=tf.constant(3,dtype=tf.float32)#
 s_min = tf.constant([[0.3]],dtype=tf.float32)
 s_max = tf.constant([[1.8]],dtype=tf.float32)
@@ -90,15 +90,17 @@ def place_params(detectors,real_time,mask):
 def detectors_core(detectors,core):
     detectors_c=detectors[:,:,:,:2]-tf.reshape(core,(-1,1,1,2))
     return tf.concat([detectors_c,detectors[:,:,:,2:3]],axis=-1)
+@tf.function
 def place_reconstruction(detectors,mask,t0,theta,phi,use_z=False):
     t0=expand_dims(t0) # shape (batch,1,1,1)
     theta=expand_dims(theta)
     phi =expand_dims(phi)
     if use_z:
-        n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)*(1e6/c)
+        n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)
     else:
-        n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta)],axis=-1)*(1e6/c)
-    t_place =  tf.expand_dims(tf.reduce_sum(detectors*n,axis=-1),-1)
+        n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta)],axis=-1)
+    n=tf.cast(n,tf.float32)
+    t_place =  tf.expand_dims(tf.reduce_sum(detectors*n,axis=-1),-1)*(1e6/c)
     t_place = t_place*mask
     return t_place
 def eta_fun(theta):
@@ -109,21 +111,42 @@ def eta_fun(theta):
                + 1.35747298e-04)*x -2.18241567e-03)*x + 1.18960682e-02)*x
              + 3.70692527e+00)
     res = tf.where(x<62.7,e1,e2)
-    res =tf.where(res>0,res,0)
+#     res =tf.where(res>0,res,0)
     return res
-def s_profile_tasimple(r_ta,theta):
-    r = r_ta
+def linsley_t(r,S):
+    return 0.67*tf.math.pow((1 + r/LINSLEY_r0), 1.5)*tf.math.pow(S, -0.5)*1e-3
+def s_profile_tasimple(r_ta,theta,fl=False):
+    # убрать 1,2
+    UNIT = 1000.0
+    r = r_ta * UNIT 
     eta=eta_fun(theta)# batch,1,1
     eta=tf.repeat(eta,6,axis=1)
     eta=tf.repeat(eta,6,axis=2)
+#     print('eta',eta.shape)
     # eta shape is batch,6,6
-    Rm = tf.constant(0.09,dtype=tf.float32)
-    R1 = tf.constant(1,dtype=tf.float32)
+    Rm = tf.constant(90,dtype=tf.float32)# убрал 1.2 из-за Unit
+    R1 = tf.constant(1000,dtype=tf.float32)
+#     print('shape sprofile',r.shape,Rm.shape,R1.shape,eta.shape,theta.shape)
     return (tf.math.pow((r/Rm),-1.2)*tf.math.pow((1+r/Rm), -(eta-1.2))*tf.math.pow(1+(tf.math.pow(r,2)/R1/R1),-0.6))
+
 def s_profile(r_ta, theta):
-    #r_ta shape batch,6,6
-    f800=s_profile_tasimple(expand_dims(tf.constant(0.8)), theta)
+    f800=s_profile_tasimple(expand_dims(tf.constant(0.8)), theta,fl=False)
     return s_profile_tasimple(r_ta, theta)/f800
+@tf.function
+def courve_reconstruction(detectors,t0,theta,phi,courve):
+    # u can read from t_place if in place_reconstruction use core shift
+#     detectors = detectors_core()
+    t0=expand_dims(t0) # shape (batch,1,1,1)
+    theta=tf.cast(expand_dims(theta),tf.float32)
+    phi = tf.cast(expand_dims(phi),tf.float32)
+    n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)
+    n=tf.cast(n,tf.float32)
+    t_place = detectors[:,:,:,0:1]*n[:,:,:,0:1] + detectors[:,:,:,1:2]*n[:,:,:,1:2] + detectors[:,:,:,2:3]*n[:,:,:,2:3]
+    dist_core = tf.expand_dims(tf.reduce_sum(tf.math.pow(detectors,2),axis=-1),axis=-1) - tf.math.pow(t_place,2)
+    dist_core = tf.where(dist_core>0,tf.math.sqrt(dist_core),0)
+    LDF=s_profile(dist_core,theta)
+    td=expand_dims(courve)*linsley_t(dist_core,LDF)
+    return td,LDF,dist_core
 def pfs__pps(detectors,theta,phi,signal,mask):
 #     t0,theta,phi = self.place_params()
     # u can read from t_place if in place_reconstruction use core shift
@@ -153,27 +176,14 @@ def a_ivanov_fun(theta):
 def courve_fun(detectors,core,t0,theta,phi,signal,mask):
     a_ivanov = a_ivanov_fun(theta)
     pfs,pps = pfs__pps(detectors,theta,phi,signal,mask)
-    S_X = tf.where(pps>1e-10,pfs/pps,1)[:,0]
+    S_X = tf.where(pps>1e-10,pfs/pps,1)[:,0] # S_800
     S_X=tf.expand_dims(S_X,-1)
     courve = a_ivanov*1.3/tf.math.sqrt(S_X)
     courve = courve
 #     S_X=tf.expand_dims(S_X,-1)
     return courve,S_X
-def linsley_t(r,S):
-    return 0.67*tf.math.pow((1 + r/LINSLEY_r0), 1.5)*tf.math.pow(S, -0.5)/1e3
-def courve_reconstruction(detectors,t0,theta,phi,courve):
-    # u can read from t_place if in place_reconstruction use core shift
-#     detectors = detectors_core()
-    t0=expand_dims(t0) # shape (batch,1,1,1)
-    theta=expand_dims(theta)
-    phi = expand_dims(phi)
-    n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)
-    t_place = detectors[:,:,:,0:1]*n[:,:,:,0:1] + detectors[:,:,:,1:2]*n[:,:,:,1:2] + detectors[:,:,:,2:3]*n[:,:,:,2:3]
-    dist_core = tf.expand_dims(tf.reduce_sum(tf.math.pow(detectors,2),axis=-1),axis=-1) - tf.math.pow(t_place,2)
-    dist_core = tf.where(dist_core>R_error*R_error,tf.math.sqrt(dist_core),R_error)
-    LDF=s_profile(dist_core,theta)
-    td=expand_dims(courve)*linsley_t(dist_core,LDF)/NSEC
-    return td,LDF
+def get_linsley_s(r, S):
+    return 1.3*0.29*tf.math.pow((1 + r/R_L), 1.5)*tf.math.pow(S+1e-8, -0.3)*1e-3
 def logPua(n,nbar):
     print(n.shape,nbar.shape)
     last_part = 2*(n*tf.math.log(nbar/(n+1e-8)) + (n - nbar))
@@ -200,6 +210,18 @@ def chi2L(S_X,s_prof,mask,signal):
 #         chi2L3 = -tf.reduce_sum(0.4*self.logPua(S*self.DET_AREA, s_fit*self.DET_AREA)*maskL3,axis=(1,2))
 #         print(chi2L2.shape,chi3L.shape)
     return chi2L2  #+ chi3L
+@tf.function
+def chiT_by_param(real_time, detectors,t0,theta,phi,courve,mask,S_800):
+    flat_reco = place_reconstruction(detectors,mask,t0,theta,phi,True)
+    td,LDF,dist_core = courve_reconstruction(detectors,t0,theta,phi,courve)
+    time_reco = t0 + flat_reco + td
+    
+    lin_s = get_linsley_s(dist_core, expand_dims(S_800)*LDF)
+#     print(courve.shape, tf.math.sqrt(S_800).shape, lin_s.shape)
+    t_s = expand_dims(courve*tf.math.sqrt(S_800))*lin_s
+    t_sigma2=tf.math.sqrt(t0_err*t0_err + t_s*t_s) 
+    chi2T = tf.reduce_sum(tf.math.pow((time_reco-real_time)/t_sigma2*mask,2),axis=(1,2)) #
+    return chi2T
 def optimization(data,iterats,num,detectors_rub=None):
     Adam = tf.keras.optimizers.Adam()
     signal = data[:,:,:,0:1]
@@ -234,7 +256,7 @@ def optimization(data,iterats,num,detectors_rub=None):
             gr.watch(params)
             
             t0=params[0]
-            theta=params[1]
+            theta=tf.math.abs(params[1])
             phi=params[2]
             courve=params[3]
             core=params[4]
@@ -246,8 +268,8 @@ def optimization(data,iterats,num,detectors_rub=None):
             time_reco = expand_dims(t0) + t_place +td
             chi_T=tf.reduce_sum(tf.math.pow((time_reco-real_time)*mask,2)/t_sigma2,axis=(1,2))
             chi_L=chi2L(S_X,s_prof,mask,signal)
-            chi = chi_T #+chi_L
-#             print(tf.reduce_mean(chi_T),tf.reduce_mean(chi_L),end='\r')
+            chi = chi_T +chi_L
+            print(tf.reduce_mean(chi_T),tf.reduce_mean(chi_L),end='\r')
             if num:
                 print(chi_T[num],chi_L[num],[np.array(i[num]) for i in params],end='\r')
             chi_list.append(chi)
