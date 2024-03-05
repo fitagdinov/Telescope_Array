@@ -1,5 +1,8 @@
 import tensorflow as tf
 import math
+import copy
+import tqdm
+import numpy as np
 pi = tf.constant(math.pi,dtype=tf.float32)
 UNIT=1
 dist=tf.constant(1.2,dtype=tf.float32)# min dist between 2 detectors in km
@@ -90,7 +93,6 @@ def place_params(detectors,real_time,mask):
 def detectors_core(detectors,core):
     detectors_c=detectors[:,:,:,:2]-tf.reshape(core,(-1,1,1,2))
     return tf.concat([detectors_c,detectors[:,:,:,2:3]],axis=-1)
-@tf.function
 def place_reconstruction(detectors,mask,t0,theta,phi,use_z=False):
     t0=expand_dims(t0) # shape (batch,1,1,1)
     theta=expand_dims(theta)
@@ -132,7 +134,6 @@ def s_profile_tasimple(r_ta,theta,fl=False):
 def s_profile(r_ta, theta):
     f800=s_profile_tasimple(expand_dims(tf.constant(0.8)), theta,fl=False)
     return s_profile_tasimple(r_ta, theta)/f800
-@tf.function
 def courve_reconstruction(detectors,t0,theta,phi,courve):
     # u can read from t_place if in place_reconstruction use core shift
 #     detectors = detectors_core()
@@ -204,13 +205,9 @@ def chi2L(S_X,s_prof,mask,signal):
     qs=signal
     s_sigma2 = ( 2*qs/DET_AREA + tf.math.pow( 0.15*qs, 2 ) + 1e-6 )
     maskL2 = tf.where(qs>4.0,mask,0)
-    S=S_X
+    N=tf.reduce_sum(maskL2,axis = (1,2,3))
     chi2L2=tf.reduce_sum((qs - s_fit)*(qs - s_fit)/s_sigma2*maskL2,axis=(1,2))
-#     maskL3 = tf.where(s_fit<4.0,mask,0)
-#         chi2L3 = -tf.reduce_sum(0.4*self.logPua(S*self.DET_AREA, s_fit*self.DET_AREA)*maskL3,axis=(1,2))
-#         print(chi2L2.shape,chi3L.shape)
-    return chi2L2  #+ chi3L
-@tf.function
+    return chi2L2, N
 def chiT_by_param(real_time, detectors,t0,theta,phi,courve,mask,S_800):
     flat_reco = place_reconstruction(detectors,mask,t0,theta,phi,True)
     td,LDF,dist_core = courve_reconstruction(detectors,t0,theta,phi,courve)
@@ -221,25 +218,16 @@ def chiT_by_param(real_time, detectors,t0,theta,phi,courve,mask,S_800):
     t_s = expand_dims(courve*tf.math.sqrt(S_800))*lin_s
     t_sigma2=tf.math.sqrt(t0_err*t0_err + t_s*t_s) 
     chi2T = tf.reduce_sum(tf.math.pow((time_reco-real_time)/t_sigma2*mask,2),axis=(1,2)) #
-    return chi2T
+    return chi2T,LDF
 def optimization(data,iterats,num,detectors_rub=None):
     Adam = tf.keras.optimizers.Adam()
     signal = data[:,:,:,0:1]
     real_time = data[:,:,:,1:2]+data[:,:,:,2:3]
     mask=data[:,:,:,3:4]
     batch = data.shape[0]
-    #detectors
-#     if not (detectors_rub is None):
-#         detectors_orig  = detectors_init(data)
-#         core = core_(detectors_orig ,signal)
-#         detectors = detectors_core(detectors_orig ,core)
-#         detectors_z = tf.concat([detectors,tf.zeros_like(detectors[:,:,:,0:1])],axis=-1)
-#         core = tf.zeros((batch,2))
-#         use_z=False
-#     else:
     detectors_z = detectors_rub
     detectors=detectors_z[:,:,:,:2]
-    core = tf.zeros((batch,2))
+    core = tf.zeros((batch,3))
     use_z=True
     
     
@@ -248,32 +236,31 @@ def optimization(data,iterats,num,detectors_rub=None):
     chi_list=[]
     par = [t0,theta,phi,courve,core,S_X]
     params=[tf.Variable(p, True) for p in par]
-#         params=tf.concat([t0,theta,phi,courve,core,S_X],axis=1)
     params_list=[]
     params_list.append(copy.deepcopy(params))
     for i in tqdm.notebook.tqdm_notebook(range(iterats)):
         with tf.GradientTape() as gr:  
             gr.watch(params)
-            
             t0=params[0]
             theta=tf.math.abs(params[1])
             phi=params[2]
             courve=params[3]
-            core=params[4]
+            core=params[4][:,np.newaxis,np.newaxis,:]
             S_X=params[5]
-            detectors_z = detectors_core(detectors_z ,core)
-            t_place = place_reconstruction(detectors_z,mask,t0,theta,phi,use_z)
-            td,s_prof = courve_reconstruction(detectors_z,t0,theta,phi,courve)  #update LDF <==> s_profile
-            t_sigma2=(t0_err*t0_err + td*td) * t_err_res
-            time_reco = expand_dims(t0) + t_place +td
-            chi_T=tf.reduce_sum(tf.math.pow((time_reco-real_time)*mask,2)/t_sigma2,axis=(1,2))
-            chi_L=chi2L(S_X,s_prof,mask,signal)
-            chi = chi_T +chi_L
-            print(tf.reduce_mean(chi_T),tf.reduce_mean(chi_L),end='\r')
-            if num:
-                print(chi_T[num],chi_L[num],[np.array(i[num]) for i in params],end='\r')
+#             detectors_z = detectors_z-core
+            chi_T,LDF = chiT_by_param(real_time, detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
+            chi_L, N_L=chi2L(S_X,LDF,mask,signal)
+            N_t = tf.reduce_sum(mask,axis=(1,2,3))
+            N=tf.expand_dims(N_L+N_t,1)
+            global_n = tf.where(N>7,N-7,1)
+            chi = (chi_T +chi_L)/global_n
+            print(tf.reduce_mean(chi_T/global_n),tf.reduce_mean(chi_L/global_n),tf.reduce_mean(chi),end='\n')
+#             if num:
+#                 print(chi_T[num],chi_L[num],[np.array(i[num]) for i in params],end='\r')
+#             else:
+#                 print(tf.reduce_mean(chi_T), tf.reduce_mean(chi_L))
             chi_list.append(chi)
-            grad=gr.gradient(chi,params)[:6]
+            grad=gr.gradient(chi,params)
 #             print([tf.reduce_mean(i) for i in grad],end = '\r')
             Adam.apply_gradients(zip(grad, params))
             params_list.append(copy.deepcopy(params))
