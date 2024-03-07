@@ -14,7 +14,7 @@ DET_AREA=tf.constant(3,dtype=tf.float32)#
 s_min = tf.constant([[0.3]],dtype=tf.float32)
 s_max = tf.constant([[1.8]],dtype=tf.float32)
 t_err_res=tf.constant(c/1e6,dtype=tf.float32)#
-t0_err=tf.constant(30,dtype=tf.float32)#
+t0_err=tf.constant(0.03,dtype=tf.float32)#
 dist=tf.constant(1.2,dtype=tf.float32)
 tf_type = tf.float32
 R_error = 0.15
@@ -221,15 +221,21 @@ def chiT_by_param(real_time, detectors,t0,theta,phi,courve,mask,S_800):
     return chi2T,LDF
 def optimization(data,iterats,num,detectors_rub=None):
     Adam = tf.keras.optimizers.Adam()
-    signal = data[:,:,:,0:1]
-    real_time = data[:,:,:,1:2]+data[:,:,:,2:3]
+    
     mask=data[:,:,:,3:4]
+    signal = data[:,:,:,0:1]*mask
+    # без этого лучше работатет хи-Т
+#     mask = tf.where(signal==0,0,mask)
+    real_time = (data[:,:,:,1:2]+data[:,:,:,2:3])*mask
     batch = data.shape[0]
     detectors_z = detectors_rub
     detectors=detectors_z[:,:,:,:2]
     core = tf.zeros((batch,3))
     use_z=True
     
+    signal = tf.cast(signal,tf.float32)
+    real_time = tf.cast(real_time,tf.float32)
+    mask = tf.cast(mask,tf.float32)
     
     t0,theta,phi = place_params(detectors,real_time,mask)
     courve,S_X = courve_fun(detectors_z,core,t0,theta,phi,signal,mask)
@@ -247,19 +253,18 @@ def optimization(data,iterats,num,detectors_rub=None):
             courve=params[3]
             core=params[4][:,np.newaxis,np.newaxis,:]
             S_X=params[5]
-#             detectors_z = detectors_z-core
+            detectors_z = detectors_z-core
             chi_T,LDF = chiT_by_param(real_time, detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
-            chi_L, N_L=chi2L(S_X,LDF,mask,signal)
+            mask_ = tf.where(signal==0,0,mask)
+            signal_ = signal*mask_
+            
+            chi_L, N_L=chi2L(S_X,LDF*mask,mask_,signal_)
+#             chi_L*=tf.constant(0,dtype=tf.float32)
             N_t = tf.reduce_sum(mask,axis=(1,2,3))
             N=tf.expand_dims(N_L+N_t,1)
             global_n = tf.where(N>7,N-7,1)
             chi = (chi_T +chi_L)/global_n
             print(tf.reduce_mean(chi_T/global_n),tf.reduce_mean(chi_L/global_n),tf.reduce_mean(chi),end='\n')
-#             if num:
-#                 print(chi_T[num],chi_L[num],[np.array(i[num]) for i in params],end='\r')
-#             else:
-#                 print(tf.reduce_mean(chi_T), tf.reduce_mean(chi_L))
-            chi_list.append(chi)
             grad=gr.gradient(chi,params)
 #             print([tf.reduce_mean(i) for i in grad],end = '\r')
             Adam.apply_gradients(zip(grad, params))
