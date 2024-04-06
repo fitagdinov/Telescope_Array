@@ -193,7 +193,7 @@ def logPua(n,nbar):
     return res
 def chi2L(S_X,s_prof,mask,signal):
     s_fit = (expand_dims(S_X)*s_prof*mask) #/ DET_AREA
-    qs=(signal) #/ DET_AREA
+    qs=signal#/ DET_AREA
     s_sigma2_huge = ( 2*s_fit/DET_AREA + tf.math.pow( 0.15*s_fit, 2 ) + 1e-6 )
     s_sigma2_small = 1.0/DET_AREA/DET_AREA
     s_sigma2 = tf.where(s_fit<0.1,s_sigma2_small,s_sigma2_huge)
@@ -201,9 +201,10 @@ def chi2L(S_X,s_prof,mask,signal):
     N=tf.reduce_sum(maskL2,axis = (1,2,3))
     chi2L2=tf.reduce_sum((qs - s_fit)*(qs - s_fit)/s_sigma2*maskL2,axis=(1,2))
     return chi2L2, N ,s_sigma2
-def chiT_by_param(real_time, detectors,t0,theta,phi,courve,mask,S_800):
+#TODO add mask
+def chiT_by_param(real_time, detectors,detectors_z,t0,theta,phi,courve,mask,S_800):
     flat_reco = place_reconstruction(detectors,mask,t0,theta,phi,True)
-    td,LDF,dist_core = courve_reconstruction(detectors,t0,theta,phi,courve)
+    td,LDF,dist_core = courve_reconstruction(detectors_z,t0,theta,phi,courve)
     time_reco = t0 + flat_reco + td
     
     lin_s = get_linsley_s(dist_core, expand_dims(S_800)*LDF)
@@ -213,9 +214,16 @@ def chiT_by_param(real_time, detectors,t0,theta,phi,courve,mask,S_800):
     return chi2T,LDF
 def optimization(data,iterats,num,detectors_rub=None,
                  add_mask = None, l_r=0.001, use_core=False,
-                 use_L=True,S800_rub=None):
-    Adam = tf.keras.optimizers.Adam(l_r)
+                 use_L=True,S800_rub=None,optim_name = "Adam"):
     
+    if optim_name == "Adam":
+        optimizer = tf.keras.optimizers.Adam(l_r)
+    elif optim_name == "SGD":
+        optimizer = tf.keras.optimizers.SGD(l_r)
+    elif optim_name == "Nadam":
+        optimizer = tf.keras.optimizers.Nadam(l_r)
+    else:
+        raise OptimizerNameExcept("Wrong name optimizer")
     mask=data[:,:,:,3:4]
     #add mask
     if not(add_mask is None):
@@ -227,7 +235,7 @@ def optimization(data,iterats,num,detectors_rub=None,
 #     mask = tf.where(signal==0,0,mask)
     real_time = (data[:,:,:,1:2]+data[:,:,:,2:3])*mask
     batch = data.shape[0]
-    detectors_z = detectors_rub
+    detectors_z = detectors_rub.copy()
     detectors=detectors_z[:,:,:,:2]
     core = tf.zeros((batch,2))
     use_z=True
@@ -263,11 +271,13 @@ def optimization(data,iterats,num,detectors_rub=None,
                 S_X=params[4]
             if use_core:
                 core=params[5][:,np.newaxis,np.newaxis,:]
-                print('core: ', tf.math.reduce_mean(core), tf.math.reduce_std(core))
-                detectors_z = tf.concat([detectors_z[:,:,:,0:2]-core, detectors_z[:,:,:,2:3]], axis= -1) 
-            chi_T,LDF = chiT_by_param(real_time, detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
-            mask_ = tf.where(signal==0,0,mask)
-            mask_ = tf.where(~add_mask[:,:,:,0:1],mask,0)
+                q=tf.math.reduce_sum(tf.math.pow(core,2),axis=-1)
+                print('core: ', tf.math.reduce_mean(core), tf.math.reduce_std(core),tf.math.reduce_sum(tf.where(q>0.5*0.5,1,0)))
+                detectors_z = tf.concat([detectors_rub[:,:,:,0:2]-core, detectors_rub[:,:,:,2:3]], axis= -1) 
+            chi_T,LDF = chiT_by_param(real_time, detectors_rub,detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
+#             mask_ = tf.where(signal==0,0,mask)
+            if not(add_mask is None):
+                mask_ = tf.where(~add_mask[:,:,:,0:1],mask,0)
             signal_ = signal*mask_
             
             chi_L, N_L, _=chi2L(S_X,LDF*mask,mask_,signal_)
@@ -277,9 +287,9 @@ def optimization(data,iterats,num,detectors_rub=None,
             N=tf.expand_dims(N_L+N_t,1)
             global_n = tf.where(N>7,N-7,1)
             chi = (chi_T +chi_L)/global_n
-            print(tf.reduce_mean(chi_T/global_n),tf.reduce_mean(chi_L/global_n),tf.reduce_mean(chi),end='\r')
+            print(tf.reduce_mean(chi_T/global_n),tf.reduce_mean(chi_L/global_n),tf.reduce_mean(chi),end='\n')
             grad=gr.gradient(chi,params)
-            Adam.apply_gradients(zip(grad, params))
+            optimizer.apply_gradients(zip(grad, params))
             chi_list.append(chi)
             params_list.append(copy.deepcopy(params))
     for s1,p1 in enumerate(params_list):
