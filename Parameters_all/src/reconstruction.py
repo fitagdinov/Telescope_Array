@@ -88,11 +88,13 @@ def place_reconstruction(detectors,mask,t0,theta,phi,use_z=False):
     theta=expand_dims(theta)
     phi =expand_dims(phi)
     if use_z:
-        n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)
+        n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),-tf.math.cos(theta)],axis=-1)
     else:
         n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta)],axis=-1)
     n=tf.cast(n,tf.float32)
+    print('n',n[0])
     t_place =  tf.expand_dims(tf.reduce_sum(detectors*n,axis=-1),-1)*(1e6/c)
+    print('r', tf.expand_dims(tf.reduce_sum(detectors*n,axis=-1),-1)[0,:,:,0])
     t_place = t_place*mask
     return t_place
 def eta_fun(theta):
@@ -119,10 +121,13 @@ def s_profile_tasimple(r_ta,theta,fl=False):
     Rm = tf.constant(90,dtype=tf.float32)# убрал 1.2 из-за Unit
     R1 = tf.constant(1000,dtype=tf.float32)
 #     print('shape sprofile',r.shape,Rm.shape,R1.shape,eta.shape,theta.shape)
+    print('eta',eta[0,:,:,0])
     return (tf.math.pow((r/Rm),-1.2)*tf.math.pow((1+r/Rm), -(eta-1.2))*tf.math.pow(1+(tf.math.pow(r,2)/R1/R1),-0.6))
 
 def s_profile(r_ta, theta):
     f800=s_profile_tasimple(expand_dims(tf.constant(0.8)), theta,fl=False)
+    print('f800',f800[0,:,:,0])
+    print("s_prof_r",s_profile_tasimple(r_ta, theta)[0,:,:,0])
     return s_profile_tasimple(r_ta, theta)/f800
 def courve_reconstruction(detectors,t0,theta,phi,courve):
     # u can read from t_place if in place_reconstruction use core shift
@@ -130,13 +135,15 @@ def courve_reconstruction(detectors,t0,theta,phi,courve):
     t0=expand_dims(t0) # shape (batch,1,1,1)
     theta=tf.cast(expand_dims(theta),tf.float32)
     phi = tf.cast(expand_dims(phi),tf.float32)
-    n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)
+    n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),-tf.math.cos(theta)],axis=-1)
     n=tf.cast(n,tf.float32)
     t_place = detectors[:,:,:,0:1]*n[:,:,:,0:1] + detectors[:,:,:,1:2]*n[:,:,:,1:2] + detectors[:,:,:,2:3]*n[:,:,:,2:3]
     dist_core = tf.expand_dims(tf.reduce_sum(tf.math.pow(detectors,2),axis=-1),axis=-1) - tf.math.pow(t_place,2)
     dist_core = tf.where(dist_core>0,tf.math.sqrt(dist_core),0)
+    print('r',dist_core[0,:,:,0])
     dist_core = tf.where(dist_core<R_error,R_error,dist_core)
     LDF=s_profile(dist_core,theta)
+    print('s_prof',LDF[0,:,:,0])
     td=expand_dims(courve)*linsley_t(dist_core,LDF)
     return td,LDF,dist_core
 def pfs__pps(detectors,theta,phi,signal,mask):
@@ -193,6 +200,8 @@ def logPua(n,nbar):
     return res
 def chi2L(S_X,s_prof,mask,signal):
     s_fit = (expand_dims(S_X)*s_prof*mask) #/ DET_AREA
+    print('s_prof',s_prof[0,:,:,0])
+    print('s_fit',s_fit[0,:,:,0])
     qs=signal#/ DET_AREA
     s_sigma2_huge = ( 2*s_fit/DET_AREA + tf.math.pow( 0.15*s_fit, 2 ) + 1e-6 )
     s_sigma2_small = 1.0/DET_AREA/DET_AREA
@@ -209,7 +218,7 @@ def chiT_by_param(real_time, detectors,detectors_z,t0,theta,phi,courve,mask,S_80
     
     lin_s = get_linsley_s(dist_core, expand_dims(S_800)*LDF)
     t_s = expand_dims(courve*tf.math.sqrt(S_800))*lin_s
-    t_sigma2=tf.math.sqrt(t0_err*t0_err + t_s*t_s) 
+    t_sigma2=tf.math.sqrt(t0_err*t0_err + t_s*t_s)
     chi2T = tf.reduce_sum(tf.math.pow((time_reco-real_time)/t_sigma2*mask,2),axis=(1,2)) #
     return chi2T,LDF
 def optimization(data,iterats,num,detectors_rub=None,
@@ -269,6 +278,7 @@ def optimization(data,iterats,num,detectors_rub=None,
                 S_X=S800_rub
             else:
                 S_X=params[4]
+
             if use_core:
                 core=params[5][:,np.newaxis,np.newaxis,:]
                 q=tf.math.reduce_sum(tf.math.pow(core,2),axis=-1)
@@ -286,7 +296,7 @@ def optimization(data,iterats,num,detectors_rub=None,
             N_t = tf.reduce_sum(mask,axis=(1,2,3))
             N=tf.expand_dims(N_L+N_t,1)
             global_n = tf.where(N>7,N-7,1)
-            chi = (chi_T +chi_L)/global_n
+            chi = tf.math.sqrt((chi_T +chi_L)/global_n)
             print(tf.reduce_mean(chi_T/global_n),tf.reduce_mean(chi_L/global_n),tf.reduce_mean(chi),end='\n')
             grad=gr.gradient(chi,params)
             optimizer.apply_gradients(zip(grad, params))
