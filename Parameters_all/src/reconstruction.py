@@ -91,7 +91,9 @@ def place_reconstruction(detectors,mask,t0,theta,phi,use_z=False):
         n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)
     else:
         n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta)],axis=-1)
+    
     n=tf.cast(n,tf.float32)
+    # print('n',n[3])
     t_place =  tf.expand_dims(tf.reduce_sum(detectors*n,axis=-1),-1)*(1e6/c)
     t_place = t_place*mask
     return t_place
@@ -133,11 +135,16 @@ def courve_reconstruction(detectors,t0,theta,phi,courve):
     n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)
     n=tf.cast(n,tf.float32)
     t_place = detectors[:,:,:,0:1]*n[:,:,:,0:1] + detectors[:,:,:,1:2]*n[:,:,:,1:2] + detectors[:,:,:,2:3]*n[:,:,:,2:3]
+    # print('r_plane',t_place[3,:,:,0])
     dist_core = tf.expand_dims(tf.reduce_sum(tf.math.pow(detectors,2),axis=-1),axis=-1) - tf.math.pow(t_place,2)
     dist_core = tf.where(dist_core>0,tf.math.sqrt(dist_core),0)
     dist_core = tf.where(dist_core<R_error,R_error,dist_core)
+    # print('dist_core',dist_core[3,:,:,0])
     LDF=s_profile(dist_core,theta)
+
+    # print('s_profile',LDF[3,:,:,0])
     td=expand_dims(courve)*linsley_t(dist_core,LDF)
+    # print('td',td[3,:,:,0])
     return td,LDF,dist_core
 def pfs__pps(detectors,theta,phi,signal,mask):
 #     t0,theta,phi = self.place_params()
@@ -177,7 +184,7 @@ def courve_fun(detectors,core,t0,theta,phi,signal,mask):
 def get_linsley_s(r, S):
     return 1.3*0.29*tf.math.pow((1 + r/R_L), 1.5)*tf.math.pow(S+1e-8, -0.3)*1e-3
 def logPua(n,nbar):
-    print(n.shape,nbar.shape)
+    # print(n.shape,nbar.shape)
     last_part = 2*(n*tf.math.log(nbar/(n+1e-8)) + (n - nbar))
 
     nbar_logical=tf.where(nbar < 1e-90,True,False)
@@ -193,20 +200,31 @@ def logPua(n,nbar):
     return res
 def chi2L(S_X,s_prof,mask,signal):
     s_fit = (expand_dims(S_X)*s_prof*mask) #/ DET_AREA
+    # print('s_fit',s_fit[0,:,:,0])
     qs=signal#/ DET_AREA
-    s_sigma2_huge = ( 2*s_fit/DET_AREA + tf.math.pow( 0.15*s_fit, 2 ) + 1e-6 )
+    s_sigma2_huge = ( 2*qs/DET_AREA + tf.math.pow( 0.15*qs, 2 ) + 1e-6 )
     s_sigma2_small = 1.0/DET_AREA/DET_AREA
-    s_sigma2 = tf.where(s_fit<0.1,s_sigma2_small,s_sigma2_huge)
-    maskL2 = tf.where(qs>4.0,mask,0)
-    N=tf.reduce_sum(maskL2,axis = (1,2,3))
+    s_sigma2 = tf.where(qs<0.1,s_sigma2_small,s_sigma2_huge)
+    # print('s_err',s_sigma2[0,:,:,0])
+    maskL2 = tf.where(s_fit>4.0,mask,0)
+    # print('shapes L2',qs.shape,s_fit.shape,s_sigma2.shape,((qs - s_fit)*(qs - s_fit)/s_sigma2*maskL2).shape)
     chi2L2=tf.reduce_sum((qs - s_fit)*(qs - s_fit)/s_sigma2*maskL2,axis=(1,2))
-    return chi2L2, N ,s_sigma2
+
+    maskL3 = tf.where(s_fit<4.0,mask,0)
+    # >0.1 just mask/don't work other
+    chi2L3 = -0.4*tf.reduce_sum(2*tf.where(maskL3>0.1,qs*DET_AREA*tf.math.log(s_fit/qs) + DET_AREA*(qs-s_fit),0.0),axis=(1,2))
+    # print('log',tf.math.log(s_fit/qs)[0,:,:,0])
+    # print('chi2L3',chi2L3[0])
+    # print('chi2L3 L2',chi2L3.shape,chi2L2.shape)
+    N=tf.reduce_sum(maskL2,axis = (1,2,3))#+tf.reduce_sum(maskL3,axis = (1,2,3))
+    # print('N L',N[0])
+    return chi2L2, N ,s_sigma2 #+chi2L3
 #TODO add mask
 def chiT_by_param(real_time, detectors,detectors_z,t0,theta,phi,courve,mask,S_800):
     flat_reco = place_reconstruction(detectors,mask,t0,theta,phi,True)
     td,LDF,dist_core = courve_reconstruction(detectors_z,t0,theta,phi,courve)
     time_reco = t0 + flat_reco + td
-    
+    # print('time_reco',time_reco[3,:,:,0])
     lin_s = get_linsley_s(dist_core, expand_dims(S_800)*LDF)
     t_s = expand_dims(courve*tf.math.sqrt(S_800))*lin_s
     t_s = td
