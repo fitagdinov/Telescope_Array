@@ -25,7 +25,7 @@ def detectors_init(data):
     x = tf.expand_dims(x,-1)
     y = tf.expand_dims(y,-1)
     # x.shape = (6,6,1)
-    detectors = tf.concat([x,y],axis=-1) * dist
+    detectors = tf.concat([y,x],axis=-1) * dist
     detectors = tf.repeat(tf.expand_dims(detectors,0),batch,0)
     return detectors
 def core_(detectors,signal):# shape (batch,6,6,2)
@@ -232,7 +232,8 @@ def chiT_by_param(real_time, detectors,detectors_z,t0,theta,phi,courve,mask,S_80
     # print('time_reco',time_reco[3,:,:,0])
     lin_s = get_linsley_s(dist_core, expand_dims(S_800)*LDF)
     t_s = expand_dims(courve*tf.math.sqrt(S_800))*lin_s
-    t_s = td
+    # print('shapes' ,S_800.shape,td.shape)
+    t_s = td * tf.math.pow(expand_dims(S_800), 0.2)
     t_sigma2=tf.math.sqrt(t0_err*t0_err + t_s*t_s) 
     chi2T = tf.reduce_sum(tf.math.pow((time_reco-real_time)/t_sigma2*mask,2),axis=(1,2)) #
     return chi2T,LDF
@@ -259,7 +260,7 @@ def optimization(data,iterats,num,detectors_rub=None,
 #     mask = tf.where(signal==0,0,mask)
     real_time = (data[:,:,:,1:2]+data[:,:,:,2:3])*mask
     batch = data.shape[0]
-    detectors_z = detectors_rub.copy()
+    detectors_z = copy(detectors_rub)
     detectors=detectors_z[:,:,:,:2]
     core = tf.zeros((batch,2))
     use_z=True
@@ -330,7 +331,8 @@ def optimization(data,iterats,num,detectors_rub=None,
     return np.array(chi_list), params_list
 def optimization_2(data,iterats,num,detectors_rub=None,
                  add_mask = None, l_r=0.001, use_core=False,
-                 use_L=True,S800_rub=None,optim_name = "Adam"):
+                 use_L=True,S800_rub=None,optim_name = "Adam",
+                 find_core=False):
     
     if optim_name == "Adam":
         optimizer = tf.keras.optimizers.Adam(l_r)
@@ -351,13 +353,20 @@ def optimization_2(data,iterats,num,detectors_rub=None,
 #     mask = tf.where(signal==0,0,mask)
     real_time = (data[:,:,:,1:2]+data[:,:,:,2:3])*mask
     batch = data.shape[0]
-    detectors_z = detectors_rub.copy()
+    detectors_z = copy.copy(detectors_rub)
+    
+    # use core which we find/ Use only z component from data
+    if find_core:
+        detectors_without_shift=detectors_init(data)
+        #with core use for begining aprox./ variable core use for other aprox. 
+        core_first=core_(detectors_without_shift,signal)[:,np.newaxis,np.newaxis,:]
+        detectors_z = tf.concat([detectors_without_shift[:,:,:,0:2]-core_first, detectors_rub[:,:,:,2:3]], axis= -1)
+    
     detectors=detectors_z[:,:,:,:2]
     core = tf.zeros((batch,2))
-    use_z=True
-    
 
-    
+    use_z=True
+
     signal = tf.cast(signal,tf.float32)
     real_time = tf.cast(real_time,tf.float32)
     mask = tf.cast(mask,tf.float32)
@@ -388,9 +397,9 @@ def optimization_2(data,iterats,num,detectors_rub=None,
             if use_core:
                 core=params[5][:,np.newaxis,np.newaxis,:]
                 q=tf.math.reduce_sum(tf.math.pow(core,2),axis=-1)
-                print('core: ', tf.math.reduce_mean(core), tf.math.reduce_std(core),tf.math.reduce_sum(tf.where(q>0.5*0.5,1,0)))
-                detectors_z = tf.concat([detectors_rub[:,:,:,0:2]-core, detectors_rub[:,:,:,2:3]], axis= -1) 
-            chi_T,LDF = chiT_by_param(real_time, detectors_rub,detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
+#                 print('core: ', tf.math.reduce_mean(core), tf.math.reduce_std(core),tf.math.reduce_sum(tf.where(q>0.5*0.5,1,0)))
+                detectors_z = tf.concat([ detectors_z[:,:,:,0:2]-core, detectors_z[:,:,:,2:3]], axis= -1) 
+            chi_T,LDF = chiT_by_param(real_time, detectors_z,detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
 #             mask_ = tf.where(signal==0,0,mask)
             if not(add_mask is None):
                 mask_ = tf.where(~add_mask[:,:,:,0:1],mask,0)
@@ -403,8 +412,9 @@ def optimization_2(data,iterats,num,detectors_rub=None,
             N=tf.expand_dims(N_L+N_t,1)
             global_n = tf.where(N>7,N-7,1)
             chi = (chi_T +chi_L)/global_n
-            print(tf.reduce_mean(chi_T/global_n),tf.reduce_mean(chi_L/global_n),tf.reduce_mean(chi),end='\n')
+#             print(tf.reduce_mean(chi_T/global_n),tf.reduce_mean(chi_L/global_n),tf.reduce_mean(chi),end='\n')
             grad=gr.gradient(chi,params)
+#             print('grad',len(grad),grad[0][3])
             optimizer.apply_gradients(zip(grad, params))
             chi_list.append(chi)
             params_list.append(copy.deepcopy(params))
