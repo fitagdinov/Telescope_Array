@@ -332,7 +332,8 @@ def optimization(data,iterats,num,detectors_rub=None,
 def optimization_2(data,iterats,num,detectors_rub=None,
                  add_mask = None, l_r=0.001, use_core=False,
                  use_L=True,S800_rub=None,optim_name = "Adam",
-                 find_core=False):
+                 find_core=False,
+                 flat_chanal = True):
     
     if optim_name == "Adam":
         optimizer = tf.keras.optimizers.Adam(l_r)
@@ -341,17 +342,23 @@ def optimization_2(data,iterats,num,detectors_rub=None,
     elif optim_name == "Nadam":
         optimizer = tf.keras.optimizers.Nadam(l_r)
     else:
-        raise OptimizerNameExcept("Wrong name optimizer")
-    mask=data[:,:,:,3:4]
-    #add mask
-    if not(add_mask is None):
-        mask = tf.where(~add_mask[:,:,:,1:2],mask,0)
-    #
+        raise ValueError("Wrong name optimizer")
     
-    signal = data[:,:,:,0:1]*mask
-    # без этого лучше работатет хи-Т
-#     mask = tf.where(signal==0,0,mask)
-    real_time = (data[:,:,:,1:2]+data[:,:,:,2:3])*mask
+    if flat_chanal:
+        mask=data[:,:,:,3:4]
+        #add mask
+        if not(add_mask is None):
+            mask = tf.where(~add_mask[:,:,:,1:2],mask,0)
+        real_time = (data[:,:,:,1:2]+data[:,:,:,2:3])*mask
+        signal = data[:,:,:,0:1]*mask
+    else:
+        mask=data[:,:,:,2:3]
+        #add mask
+        if not(add_mask is None):
+            mask = tf.where(~add_mask[:,:,:,1:2],mask,0)
+        real_time = (data[:,:,:,1:2])*mask
+        signal = data[:,:,:,0:1]*mask
+        
     batch = data.shape[0]
     detectors_z = copy.copy(detectors_rub)
     
@@ -382,8 +389,8 @@ def optimization_2(data,iterats,num,detectors_rub=None,
         par.append(core)
     params=[tf.Variable(p, True) for p in par]
     params_list=[]
-    params_list.append(copy.deepcopy(params))
-    for i in tqdm.notebook.tqdm_notebook(range(iterats)):
+    # params_list.append(copy.deepcopy(params))
+    for i in tqdm.notebook.tqdm(range(iterats),desc="find Chi"):
         with tf.GradientTape() as gr:  
             gr.watch(params)
             t0=params[0]
@@ -416,10 +423,12 @@ def optimization_2(data,iterats,num,detectors_rub=None,
             grad=gr.gradient(chi,params)
 #             print('grad',len(grad),grad[0][3])
             optimizer.apply_gradients(zip(grad, params))
-            chi_list.append(chi)
-            params_list.append(copy.deepcopy(params))
-    for s1,p1 in enumerate(params_list):
-        p2=tf.concat(p1,axis=1)
-        params_list[s1]=p2
-    params_list = np.array(params_list)
-    return np.array(chi_list), params_list
+            # chi_list.append(chi)
+            # don't work in TF
+            # params_list.append(copy.deepcopy(params))
+    # for s1,p1 in enumerate(params_list):
+    #     p2=tf.concat(p1,axis=1)
+    #     params_list[s1]=p2
+    # params_list = np.array(params_list)
+    print(chi.shape)
+    return chi, params_list
