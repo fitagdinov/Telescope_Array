@@ -134,6 +134,7 @@ def courve_reconstruction(detectors,t0,theta,phi,courve):
     phi = tf.cast(expand_dims(phi),tf.float32)
     n=-tf.concat([tf.math.cos(phi)*tf.math.sin(theta),tf.math.sin(phi)*tf.math.sin(theta),tf.math.cos(theta)],axis=-1)
     n=tf.cast(n,tf.float32)
+    # print('detectors',detectors.shape,n.shape)
     t_place = detectors[:,:,:,0:1]*n[:,:,:,0:1] + detectors[:,:,:,1:2]*n[:,:,:,1:2] + detectors[:,:,:,2:3]*n[:,:,:,2:3]
     # print('r_plane',t_place[3,:,:,0])
     dist_core = tf.expand_dims(tf.reduce_sum(tf.math.pow(detectors,2),axis=-1),axis=-1) - tf.math.pow(t_place,2)
@@ -284,7 +285,7 @@ def optimization(data,iterats,num,detectors_rub=None,
     params_list=[]
     params_list.append(copy.deepcopy(params))
     # for i in tqdm.notebook.tqdm_notebook(range(iterats)):
-    for i in range(iterats):
+    for i in tf.arange(iterats):
         with tf.GradientTape() as gr:  
             gr.watch(params)
             t0=params[0]
@@ -299,7 +300,8 @@ def optimization(data,iterats,num,detectors_rub=None,
                 core=params[5][:,np.newaxis,np.newaxis,:]
                 q=tf.math.reduce_sum(tf.math.pow(core,2),axis=-1)
                 print('core: ', tf.math.reduce_mean(core), tf.math.reduce_std(core),tf.math.reduce_sum(tf.where(q>0.5*0.5,1,0)))
-                detectors_z = tf.concat([detectors_rub[:,:,:,0:2]-core, detectors_rub[:,:,:,2:3]], axis= -1) 
+                detectors_z = tf.concat([detectors_rub[:,:,:,0:2]-core, detectors_rub[:,:,:,2:3]], axis= -1)
+                
             chi_T,LDF = chiT_by_param(real_time, detectors_rub,detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
 #             mask_ = tf.where(signal==0,0,mask)
             if use_L:
@@ -330,6 +332,204 @@ def optimization(data,iterats,num,detectors_rub=None,
     params_list = np.array(params_list)
     return np.array(chi_list), params_list
 def optimization_2(data,iterats,num,detectors_rub=None,
+                 add_mask = None, l_r=0.001, use_core=False,
+                 use_L=True,S800_rub=None,optim_name = "Adam",
+                 find_core=False,
+                 flat_chanal = True,
+                 use_det_z = True):
+    
+    if optim_name == "Adam":
+        optimizer = tf.keras.optimizers.Adam(l_r)
+    elif optim_name == "SGD":
+        optimizer = tf.keras.optimizers.SGD(l_r)
+    elif optim_name == "Nadam":
+        optimizer = tf.keras.optimizers.Nadam(l_r)
+    else:
+        raise ValueError("Wrong name optimizer")
+    
+    if flat_chanal:
+        mask=data[:,:,:,3:4]
+        #add mask
+        if not(add_mask is None):
+            mask = tf.where(~add_mask[:,:,:,1:2],mask,0)
+        real_time = (data[:,:,:,1:2]+data[:,:,:,2:3])*mask
+        signal = data[:,:,:,0:1]*mask
+    else:
+        mask=data[:,:,:,2:3]
+        #add mask
+        if not(add_mask is None):
+            mask = tf.where(~add_mask[:,:,:,1:2],mask,0)
+        real_time = (data[:,:,:,1:2])*mask
+        signal = data[:,:,:,0:1]*mask
+        
+    batch = data.shape[0]
+    detectors_z = copy.copy(detectors_rub)
+    
+    # use core which we find/ Use only z component from data
+    if find_core:
+        detectors_without_shift=detectors_init(data)
+        #with core use for begining aprox./ variable core use for other aprox. 
+        core_first=core_(detectors_without_shift,signal)[:,np.newaxis,np.newaxis,:]
+        
+        detectors_z = tf.concat([detectors_without_shift[:,:,:,0:2]-core_first, detectors_rub[:,:,:,2:3]], axis= -1)
+    
+    detectors=detectors_z[:,:,:,:2]
+    core = tf.zeros((batch,2))
+    if not(use_det_z):
+        detectors_z = tf.concat([detectors_z[:,:,:,0:2], tf.zeros_like(detectors_z[:,:,:,2:3])], axis= -1)
+    signal = tf.cast(signal,tf.float32)
+    real_time = tf.cast(real_time,tf.float32)
+    mask = tf.cast(mask,tf.float32)
+    
+    t0,theta,phi = place_params(detectors,real_time,mask)
+    courve,S_X = courve_fun(detectors_z,core,t0,theta,phi,signal,mask)
+    chi_list=[]
+    if S800_rub is None:
+        par = [t0,theta,phi,courve,S_X]
+    else:
+        par = [t0,theta,phi,courve]
+    if use_core:
+        par.append(core)
+    params=[tf.Variable(p, True) for p in par]
+    params_list = []
+    params_list.append(copy.deepcopy(params))
+    for i in tqdm.notebook.tqdm(range(iterats),desc="find Chi"):
+        with tf.GradientTape() as gr:  
+            gr.watch(params)
+            t0=params[0]
+            theta=tf.math.abs(params[1])
+            phi=params[2]
+            courve=params[3]
+            if not S800_rub is None:
+                S_X=S800_rub
+            else:
+                S_X=params[4]
+            if use_core:
+                core=params[5][:,np.newaxis,np.newaxis,:]
+                q=tf.math.reduce_sum(tf.math.pow(core,2),axis=-1)
+#                 print('core: ', tf.math.reduce_mean(core), tf.math.reduce_std(core),tf.math.reduce_sum(tf.where(q>0.5*0.5,1,0)))
+                detectors_z = tf.concat([ detectors_z[:,:,:,0:2]-core, detectors_z[:,:,:,2:3]], axis= -1)
+            
+            chi_T,LDF = chiT_by_param(real_time, detectors_z,detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
+            if not(add_mask is None):
+                mask_ = tf.where(~add_mask[:,:,:,0:1],mask,0)
+            else:
+                mask_=mask
+            signal_ = signal*mask_
+            
+            chi_L, N_L, _=chi2L(S_X,LDF*mask,mask_,signal_)
+            if not(use_L):
+                chi_L*=tf.constant(0,dtype=tf.float32)
+            N_t = tf.reduce_sum(mask,axis=(1,2,3))
+            N=tf.expand_dims(N_L+N_t,1)
+            global_n = tf.where(N>7,N-7,1)
+            chi = (chi_T +chi_L)/global_n
+            grad=gr.gradient(chi,params)
+            optimizer.apply_gradients(zip(grad, params))
+            params_list.append(copy.deepcopy(params))
+#             print('params',len(params_list),params_list)
+    for s1,p1 in enumerate(params_list):
+        p2=tf.concat(p1,axis=1)
+        params_list[s1]=p2
+    params_list = np.array(params_list)
+    return np.array(chi_list), params_list
+def optimization_tf(data,iterats,num,detectors_rub=None,
+                 add_mask = None, l_r=0.001, use_core=False,
+                 use_L=True,S800_rub=None,optim_name = "Adam",
+                 find_core=False,
+                 flat_chanal = True):
+    
+    if optim_name == "Adam":
+        optimizer = tf.keras.optimizers.Adam(l_r)
+    elif optim_name == "SGD":
+        optimizer = tf.keras.optimizers.SGD(l_r)
+    elif optim_name == "Nadam":
+        optimizer = tf.keras.optimizers.Nadam(l_r)
+    else:
+        raise ValueError("Wrong name optimizer")
+    
+    if flat_chanal:
+        mask=data[:,:,:,3:4]
+        #add mask
+        if not(add_mask is None):
+            mask = tf.where(~add_mask[:,:,:,1:2],mask,0)
+        real_time = (data[:,:,:,1:2]+data[:,:,:,2:3])*mask
+        signal = data[:,:,:,0:1]*mask
+    else:
+        mask=data[:,:,:,2:3]
+        #add mask
+        if not(add_mask is None):
+            mask = tf.where(~add_mask[:,:,:,1:2],mask,0)
+        real_time = (data[:,:,:,1:2])*mask
+        signal = data[:,:,:,0:1]*mask
+        
+    batch = data.shape[0]
+    detectors_z = tf.identity(detectors_rub)
+    
+    # use core which we find/ Use only z component from data
+    if find_core:
+        detectors_without_shift=detectors_init(data)
+        #with core use for begining aprox./ variable core use for other aprox. 
+        core_first=core_(detectors_without_shift,signal)[:,np.newaxis,np.newaxis,:]
+        detectors_z = tf.concat([detectors_without_shift[:,:,:,0:2]-core_first, detectors_rub[:,:,:,2:3]], axis= -1)
+    
+    detectors=detectors_z[:,:,:,:2]
+    core = tf.zeros((batch,2))
+
+    use_z=True
+
+    signal = tf.cast(signal,tf.float32)
+    real_time = tf.cast(real_time,tf.float32)
+    mask = tf.cast(mask,tf.float32)
+    
+    t0,theta,phi = place_params(detectors,real_time,mask)
+    courve,S_X = courve_fun(detectors_z,core,t0,theta,phi,signal,mask)
+    if S800_rub is None:
+        par = tf.concat([t0,theta,phi,courve,S_X],axis = 1)
+    else:
+        par = tf.concat([t0,theta,phi,courve],axis = 1)
+    if use_core:
+        par = tf.concat([par,core],axis = 1)
+    params= par#[tf.Variable(p, True) for p in par]
+    # i=tf.Variable(-1)
+    # while(tf.less(i, iterats)):
+    #     i = i.assign_add(1)
+    chi = tf.zeros((batch, 1))
+    mask_ = tf.zeros((batch,6,6,1))
+    for i in tf.range(0, iterats):
+        with tf.GradientTape() as gr:  
+            gr.watch(params)
+            t0=params[:,0:1]
+            theta=tf.math.abs(params[:,1:2])
+            phi=params[:,2:3]
+            courve=params[:,3:4]
+            if not S800_rub is None:
+                S_X=S800_rub
+            else:
+                S_X=params[:,4:5]
+            if use_core:
+                raise TypeError("WE CANT USE CORE IN TF FUNCTION. GO in 2 cwrsion optim.")
+                core=params[5][:,np.newaxis,np.newaxis,:]
+                q=tf.math.reduce_sum(tf.math.pow(core,2),axis=-1)
+#                 print('core: ', tf.math.reduce_mean(core), tf.math.reduce_std(core),tf.math.reduce_sum(tf.where(q>0.5*0.5,1,0)))
+                detectors_z = tf.concat([ detectors_z[:,:,:,0:2]-core, detectors_z[:,:,:,2:3]], axis= -1)
+            # print([p.shape for p in [t0,theta,phi,courve,S_X]])
+            chi_T,LDF = chiT_by_param(real_time, detectors_z,detectors_z,expand_dims(t0),theta,phi,courve,mask,S_X)
+            if not(add_mask is None):
+                mask_ = tf.where(~add_mask[:,:,:,0:1],mask,0)
+            signal_ = signal*mask_
+            
+            chi_L, N_L, _=chi2L(S_X,LDF*mask,mask_,signal_)
+            if not(use_L):
+                chi_L*=tf.constant(0,dtype=tf.float32)
+            N_t = tf.reduce_sum(mask,axis=(1,2,3))
+            N=tf.expand_dims(N_L+N_t,1)
+            global_n = tf.where(N>7,N-7,1)
+            chi = (chi_T +chi_L)/global_n
+            grad=gr.gradient(chi,[t0,theta,phi,courve,S_X])
+            optimizer.apply_gradients(zip(grad, [t0,theta,phi,courve,S_X]))
+    return chi
+def optimization_flat(data,iterats,num,detectors_rub=None,
                  add_mask = None, l_r=0.001, use_core=False,
                  use_L=True,S800_rub=None,optim_name = "Adam",
                  find_core=False,
@@ -430,5 +630,5 @@ def optimization_2(data,iterats,num,detectors_rub=None,
     #     p2=tf.concat(p1,axis=1)
     #     params_list[s1]=p2
     # params_list = np.array(params_list)
-    print(chi.shape)
-    return chi, params_list
+    flat_reco = place_reconstruction(detectors_z,mask,expand_dims(t0),theta,phi,True)
+    return flat_reco
