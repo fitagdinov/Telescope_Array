@@ -3,5 +3,5 @@ hidden_dim: 64
 latent_dim: 256
 batch_size: 400
 lr: 1e-4
-epochs: 20
-PATH: '../../Models_VAE/model_cn_latent_256__add-10'
+epoches: 20
+PATH: '../../Models_VAE/model_cn_latent_256__add-10_test'
