@@ -49,6 +49,8 @@ def train(config):
     writer = prepipline_dict['writer'] 
     PATH = config['PATH']
     epochs = config['epoches']
+    mask = config['mask']
+
     os.makedirs(PATH, exist_ok = True)
     iters = 0
     for epoch in range(epochs):
@@ -58,7 +60,7 @@ def train(config):
             x = x.to(device)
             optimizer.zero_grad()
             recon_x, mu, log_var = model(x)
-            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var)
+            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask)
             loss = recon_loss + kl_divergence
             writer.add_scalar("train/Loss", loss, iters)
             writer.add_scalar("train/KL_loss", kl_divergence, iters)
@@ -76,7 +78,7 @@ def train(config):
         for x in pbar_val:  # x должен быть пакетом последовательностей с заполнением
             x = x.to(device)
             recon_x, mu, log_var = model(x)
-            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var)
+            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask)
             loss = recon_loss + kl_divergence
             loss_mean.append(loss.item())
             KL_loss_mean.append(loss.item())
