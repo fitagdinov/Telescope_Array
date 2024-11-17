@@ -21,6 +21,7 @@ class Decoder(nn.Module):
         self.fc = nn.Linear(latent_dim, hidden_dim)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
         self.output_layer = nn.Linear(hidden_dim, output_dim)
+        # self.Conv1d = nn.Conv1d(in_channels=, out_channels=output_dim, kernel_size=) 
     def forward(self, z, seq_len):
         h = torch.relu(self.fc(z)).unsqueeze(1)  # (batch_size, 1, hidden_dim)
         h = h.repeat(1, seq_len, 1)  # Повторяем скрытое состояние для каждого шага времени
