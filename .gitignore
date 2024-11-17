@@ -15,3 +15,11 @@ nohup.out
 Parameters_all/Notebooks/.ipynb_checkpoints/main_parameters-checkpoint.ipynb Parameters_all/Notebooks/.ipynb_checkpoints/rewrite_reconstruction-checkpoint.ipynb Parameters_all/Notebooks/.ipynb_checkpoints/ta_reco-checkpoint.ipynb Parameters_all/Notebooks/.ipynb_checkpoints/ta_reco_chi2_tq-checkpoint.ipynb
 mc_hadrons_qgs34_0010.h5
 data_01_24.h5
+
+#phd
+phd_work/data/
+.ipynb_checkpoints/
+phd_work/Models_VAE/
+phd_work/src/train_VAE/runs/
+*.pyc
+

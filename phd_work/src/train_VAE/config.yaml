@@ -1,0 +1,12 @@
+input_dim: 6
+hidden_dim: 64
+latent_dim: 64
+batch_size: 400
+lr: 1e-4
+epoches: 20
+mask: -10 # с другой пока не умеет. Переписать в datasets
+PATH: '../../Models_VAE/model_cn_latent_64_mean_loss_test_show'
+show_index:
+  - 10
+  - 20
+  - 30
