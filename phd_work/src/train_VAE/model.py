@@ -2,13 +2,19 @@ from torch import nn
 import torch 
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim):
+    def __init__(self, input_dim, hidden_dim, latent_dim, hidden_dim_latent):
         super(Encoder, self).__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.lstm_seq = nn.ModuleList([nn.LSTM(hidden_dim_latent[0], hidden_dim_latent[1], batch_first=True),
+                                   nn.LSTM(hidden_dim_latent[1], hidden_dim_latent[2], batch_first=True),
+                                   nn.LSTM(hidden_dim_latent[2], hidden_dim, batch_first=True),
+                                   ])
         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
     def forward(self, x):
-        _, (h_n, c_n) = self.lstm(x)  # h_n shape: (1, batch_size, hidden_dim)
+        h, (h_n, c_n) = self.lstm(x)  # h_n shape: (1, batch_size, hidden_dim)
+        for i in range(3):
+            h, (h_n, c_n) = self.lstm_seq[i](h) 
         h_n = c_n.squeeze(0)  # убираем первую размерность
         mu = self.fc_mu(h_n)  # среднее латентного пространства
         log_var = self.fc_logvar(h_n)  # логарифм дисперсии латентного пространства
@@ -16,23 +22,31 @@ class Encoder(nn.Module):
     
 
 class Decoder(nn.Module):
-    def __init__(self, latent_dim, hidden_dim, output_dim):
+    def __init__(self, latent_dim, hidden_dim, output_dim, hidden_dim_latent):
         super(Decoder, self).__init__()
         self.fc = nn.Linear(latent_dim, hidden_dim)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        print(hidden_dim_latent)
+        self.lstm_seq = nn.ModuleList([nn.LSTM(hidden_dim_latent[0], hidden_dim_latent[1], batch_first=True),
+                                   nn.LSTM(hidden_dim_latent[1], hidden_dim_latent[2], batch_first=True),
+                                   nn.LSTM(hidden_dim_latent[2], hidden_dim, batch_first=True),
+                                   ])
         self.output_layer = nn.Linear(hidden_dim, output_dim)
         # self.Conv1d = nn.Conv1d(in_channels=, out_channels=output_dim, kernel_size=) 
     def forward(self, z, seq_len):
         h = torch.relu(self.fc(z)).unsqueeze(1)  # (batch_size, 1, hidden_dim)
         h = h.repeat(1, seq_len, 1)  # Повторяем скрытое состояние для каждого шага времени
+        for i in range(3):
+            h, _ = self.lstm_seq[i](h) 
         lstm_out, _ = self.lstm(h)  # Проходим через LSTM
         return self.output_layer(lstm_out)
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=5, hidden_dim=64, latent_dim=16, hidden_dim2=64):
+    def __init__(self, input_dim=5, hidden_dim=32, latent_dim=16, hidden_dim_latent = [32, 64, 128]):
         super(VAE, self).__init__()
-        self.encoder = Encoder(input_dim, hidden_dim, latent_dim)
-        self.decoder = Decoder(latent_dim, hidden_dim, input_dim)
+        self.encoder = Encoder(input_dim, hidden_dim, latent_dim, hidden_dim_latent)
+        print(hidden_dim_latent)
+        self.decoder = Decoder(latent_dim, hidden_dim, input_dim, hidden_dim_latent)
         print("Encoder has params:", self.count_parameters(self.encoder),"Decoder has params:", self.count_parameters(self.decoder))
         
 
