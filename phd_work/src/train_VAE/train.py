@@ -43,18 +43,20 @@ def show_pred(data, fake):
         axs[row][col].legend(['fake', 'true'])
         axs[row][col].set_title(f'chanal {i}')
     return fig
-def prepipline(config):
 
+def prepipline(config):
     name = config['PATH'].split('/')[-1]
     writer = SummaryWriter(log_dir=os.path.join('runs', name))
     writer.add_text('hparams',  str(config))
 
     dataset = DataSet.VariableLengthDataset(data_path, 'train')
     val_dataset = DataSet.VariableLengthDataset(data_path, 'test')
-
-    train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=DataSet.collate_fn)
-    val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=DataSet.collate_fn)
-    model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim']).to(device)
+    kwargs = DataSet.get_params_mask(config)
+    collate_fn = DataSet.wrapper_mask(DataSet.collate_fn_many_args, **kwargs)
+    train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
+    start_token = kwargs['start_token'].to(device)
+    model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], start_token=start_token).to(device)
     optimizer = optim.Adam(model.parameters(), lr=float(config['lr']))
     return {'train_loader': train_loader, 'val_loader': val_loader, 'model': model, 'optimizer': optimizer, 'writer': writer}
 # Цикл обучения (предполагается, что train_loader предоставляет пакеты последовательностей переменной длины)
@@ -67,7 +69,7 @@ def train(config):
     writer = prepipline_dict['writer'] 
     PATH = config['PATH']
     epochs = config['epoches']
-    mask = config['mask']
+    mask = config['padding_value']
     show_index = config['show_index']
     os.makedirs(PATH, exist_ok = True)
     iters = 0
@@ -96,11 +98,11 @@ def train(config):
         for x in pbar_val:  # x должен быть пакетом последовательностей с заполнением
             x = x.to(device)
             recon_x, mu, log_var = model(x)
-            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask)
+            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask, use_mask = config['use_mask'])
             loss = recon_loss + kl_divergence
             loss_mean.append(loss.item())
-            KL_loss_mean.append(loss.item())
-            recon_loss_mean.append(kl_divergence.item())
+            KL_loss_mean.append(kl_divergence.item())
+            recon_loss_mean.append(recon_loss.item())
             pbar_val.set_description(f"VAL Epoch {epoch + 1}/{epochs}, Loss: {loss.item():.4f}")
         torch.save(model.state_dict(), os.path.join(PATH, f'epoch_{epoch}'))
         print(f'Epoch {epoch + 1}, Loss: {np.array(loss_mean).mean()}')
