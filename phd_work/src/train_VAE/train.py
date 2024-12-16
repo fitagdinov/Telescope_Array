@@ -71,6 +71,8 @@ def train(config):
     epochs = config['epoches']
     mask = config['padding_value']
     show_index = config['show_index']
+    koef_KL = config['koef_KL']
+    use_mask = config['use_mask']
     os.makedirs(PATH, exist_ok = True)
     iters = 0
     for epoch in range(epochs):
@@ -80,8 +82,8 @@ def train(config):
             x = x.to(device)
             optimizer.zero_grad()
             recon_x, mu, log_var = model(x)
-            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask)
-            loss = recon_loss + kl_divergence
+            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask, use_mask=use_mask)
+            loss = recon_loss + koef_KL*kl_divergence
             writer.add_scalar("train/Loss", loss, iters)
             writer.add_scalar("train/KL_loss", kl_divergence, iters)
             writer.add_scalar("train/recon_loss", recon_loss, iters)

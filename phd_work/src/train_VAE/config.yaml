@@ -1,7 +1,7 @@
 input_dim: 6
-hidden_dim: 32
+hidden_dim: 64
 latent_dim: 64
-batch_size: 400
+batch_size: 1000
 lr: 1e-4
 epoches: 200
 
@@ -9,9 +9,10 @@ epoches: 200
 padding_value: -11.0
 stop_token: -10.0
 start_token: 10.0
+koef_KL: 100.0
 
-use_mask: False
-PATH: '../../Models_VAE/model_new_decoder_add_mask_not_loss'
+use_mask: True
+PATH: '../../Models_VAE/VAE_without_mask_KL=100_new_loss_h64'
 show_index:
   - 10
   - 20

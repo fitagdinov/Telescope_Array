@@ -44,8 +44,6 @@ class Decoder(nn.Module):
     def forward(self, z, seq_len):
         h = torch.relu(self.fc(z)).unsqueeze(1)  # (batch_size, 1, hidden_dim)
         h = h.repeat(1, seq_len, 1)  # Повторяем скрытое состояние для каждого шага времени
-        # for i in range(3):
-        #     h, _ = self.lstm_seq[i](h) 
         lstm_out, _ = self.lstm(h)  # Проходим через LSTM
         return self.output_layer(lstm_out)
     
@@ -95,14 +93,14 @@ class VAE(nn.Module):
         # self.decoder = Decoder(latent_dim, hidden_dim, input_dim, hidden_dim_latent)
         self.decoder = DecoderRNN(latent_dim, hidden_dim, input_dim, start_token)
         print("Encoder has params:", self.count_parameters(self.encoder),"Decoder has params:", self.count_parameters(self.decoder))
-    def reparameterize(self, mu, log_var):
+    def reparameterize(self, mu, log_var, koef=1):
         std = torch.exp(0.5 * log_var)
         eps = torch.randn_like(std)
-        return mu + eps * std
+        return mu + eps * std * koef
     def forward(self, x):
         seq_len = x.size(1)
         mu, log_var, (h_n, c_n) = self.encoder(x)
-        z = self.reparameterize(mu, log_var)
+        z = self.reparameterize(mu, log_var, koef=1.0)
         recon_x, _ = self.decoder(z, h_n, seq_len)
         return recon_x, mu, log_var
     @staticmethod
