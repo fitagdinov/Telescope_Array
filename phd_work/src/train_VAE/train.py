@@ -83,7 +83,8 @@ def train(config):
             optimizer.zero_grad()
             recon_x, mu, log_var = model(x)
             recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask, use_mask=use_mask)
-            loss = recon_loss + koef_KL*kl_divergence
+            kl_divergence *= koef_KL
+            loss = recon_loss + kl_divergence
             writer.add_scalar("train/Loss", loss, iters)
             writer.add_scalar("train/KL_loss", kl_divergence, iters)
             writer.add_scalar("train/recon_loss", recon_loss, iters)
@@ -101,6 +102,7 @@ def train(config):
             x = x.to(device)
             recon_x, mu, log_var = model(x)
             recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask, use_mask = config['use_mask'])
+            kl_divergence *= koef_KL
             loss = recon_loss + kl_divergence
             loss_mean.append(loss.item())
             KL_loss_mean.append(kl_divergence.item())

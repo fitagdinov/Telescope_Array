@@ -35,16 +35,12 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.fc = nn.Linear(latent_dim, hidden_dim)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
-        # print(hidden_dim_latent)
-        # self.lstm_seq = nn.ModuleList([nn.LSTM(hidden_dim_latent[0], hidden_dim_latent[1], batch_first=True),
-        #                            nn.LSTM(hidden_dim_latent[1], hidden_dim_latent[2], batch_first=True),
-        #                            nn.LSTM(hidden_dim_latent[2], hidden_dim, batch_first=True),
-        #                            ]) 
         self.output_layer = nn.Linear(hidden_dim, output_dim)
     def forward(self, z, seq_len):
         h = torch.relu(self.fc(z)).unsqueeze(1)  # (batch_size, 1, hidden_dim)
         h = h.repeat(1, seq_len, 1)  # Повторяем скрытое состояние для каждого шага времени
         lstm_out, _ = self.lstm(h)  # Проходим через LSTM
+        
         return self.output_layer(lstm_out)
     
 class DecoderRNN(nn.Module):
@@ -53,12 +49,13 @@ class DecoderRNN(nn.Module):
     '''
     def __init__(self, latent_dim, hidden_size, output_size, start_token: Tensor):
         super(DecoderRNN, self).__init__()
-        
+        self.lat2hid = nn.Linear(latent_dim, hidden_size)
         self.emb_fc = nn.Linear(output_size, hidden_size)
         # self.embedding = nn.Embedding(output_size, hidden_size)
         self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True)
         self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
+        self.lrealu = torch.nn.LeakyReLU(negative_slope=0.01, inplace=False)
         self.max_lenght = 100  # Maximum length of the output sequence
         self.start_token = start_token
 
@@ -68,6 +65,9 @@ class DecoderRNN(nn.Module):
         decoder_input = self.emb_fc(self.start_token).unsqueeze(1)# Zero input for the first timestep
         decoder_input = torch.repeat_interleave(decoder_input, batch_size, dim=0) # Repeat decoder_input for each timestep in the batch
         # decoder_input mast have shape (batch, 1, hidden_size)
+
+        # encoder_hidden = self.lat2hid(encoder_hidden)
+        # encoder_hidden = self.lrealu(encoder_hidden) # ad for 1st exp
         decoder_hidden = encoder_hidden.unsqueeze(0) # Use last hidden state from encoder as initial hidden state for decoder
         decoder_outputs = []
         for i in range(seq_len):
