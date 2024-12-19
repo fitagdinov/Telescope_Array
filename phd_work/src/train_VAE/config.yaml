@@ -1,18 +1,19 @@
 input_dim: 6
 hidden_dim: 256
 latent_dim: 64
-batch_size: 1000
-lr: 1e-3
+batch_size: 1500
+lr: 1e-2
 epoches: 200
 
 #for masking in dataloader
 padding_value: -11.0
 stop_token: -10.0
 start_token: 10.0
-koef_KL: 100.0
+koef_KL: 0.0
+koef_DL: 0.1
 
 use_mask: True
-PATH: '../../Models_VAE/3_exp/num2-gibrid'
+PATH: '../../Models_VAE/_test_mask_moreLR'
 show_index:
   - 10
   - 20

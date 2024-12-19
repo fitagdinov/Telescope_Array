@@ -58,7 +58,10 @@ class DecoderRNN(nn.Module):
         self.lrealu = torch.nn.LeakyReLU(negative_slope=0.01, inplace=False)
         self.max_lenght = 100  # Maximum length of the output sequence
         self.start_token = start_token
-
+        # predict lenght of sequences
+        self.fc_seq = nn.Linear(latent_dim, hidden_size)
+        self.fc_seq2 = nn.Linear(hidden_size, 1)
+        self.relu = nn.ReLU()
     def forward(self, encoder_outputs, encoder_hidden, seq_len):
         # start_token shape (1,6)
         batch_size = encoder_outputs.size(0)
@@ -76,8 +79,13 @@ class DecoderRNN(nn.Module):
             decoder_output = self.out(decoder_output)
             decoder_outputs.append(decoder_output)
         decoder_outputs = torch.cat(decoder_outputs, dim=1)
-        # decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
-        return decoder_outputs, decoder_hidden
+
+        #predict lenght of sequences
+        num = self.fc_seq(encoder_outputs)
+        num = self.lrealu(num)
+        num = self.fc_seq2(num)
+        num = self.relu(num)
+        return decoder_outputs, decoder_hidden, num
 
     def forward_step(self, input, hidden):
         # output = self.embedding(input)
@@ -101,8 +109,8 @@ class VAE(nn.Module):
         seq_len = x.size(1)
         mu, log_var, (h_n, c_n) = self.encoder(x)
         z = self.reparameterize(mu, log_var, koef=1.0)
-        recon_x, _ = self.decoder(z, h_n, seq_len)
-        return recon_x, mu, log_var
+        recon_x, _, num = self.decoder(z, h_n, seq_len)
+        return recon_x, mu, log_var, num
     @staticmethod
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)

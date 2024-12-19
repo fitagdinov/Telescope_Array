@@ -17,6 +17,7 @@ data_path = '/home/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_
 import model as Model
 import datasets as DataSet
 import loss as Loss
+from typing import Optional, Tuple, Union
 
 from torch.utils.tensorboard import SummaryWriter
 import yaml
@@ -25,8 +26,34 @@ def read_config(config: str = 'config.yaml'):
     with open(config, 'r') as file:
         hparams = yaml.safe_load(file)
     return hparams
+def clean_mask(data: torch.Tensor, tokens: Optional[Tuple[int, int, int]] =None, lenght: Optional[int]=None) -> torch.Tensor:
+    """
+    This function cleans a masked tensor by removing start, end, and mask tokens, and adjusting the length accordingly.
 
-def show_pred(data, fake):
+    Parameters:
+    - data (torch.Tensor): The input tensor to be cleaned. It should be of shape (sequence_length, features).
+    - tokens (Optional[Tuple[int, int, int]]): A tuple containing the start token, end token, and mask token. If None, default values will be used.
+
+    Returns:
+    torch.Tensor: The cleaned tensor with the start, end, and mask tokens removed, and the length adjusted accordingly.
+    """
+    if lenght is not None:
+        return data[:lenght], lenght
+    st, fn, ms = tokens
+    mask = torch.where(data != ms, 1, 0)
+    lenght = torch.sum(mask[:,0]) # length but used st and fn tokens
+    if fn is not None:
+        lenght-=1 # fn token is not real data
+    if st is not None:
+        data = data[1:] # del first data
+        lenght-=1
+    return data[:lenght], lenght
+
+    
+    
+        
+    
+def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None, lenght_predict: Union[np.ndarray, torch.Tensor] = None) -> plt.figure:
     '''
     data - shape (det, featches)
 
@@ -34,6 +61,22 @@ def show_pred(data, fake):
 
     return: fig
     '''
+
+    #TODO переписать нормально
+    data, real_lenght = clean_mask(data, tokens = tokens)
+    if lenght_predict is not None:
+        print('lenght_predict', lenght_predict.shape)
+        fake_lenght = float(lenght_predict)
+        if tokens[0] is not None:
+            # have start token
+            fake = fake[1:]
+        fake, _ = clean_mask(fake, tokens = tokens, lenght=real_lenght)
+    else:
+        if tokens[0] is not None:
+            # have start token
+            fake = fake[1:]
+        fake, fake_lenght = clean_mask(fake, tokens = tokens, lenght=real_lenght)
+    names = ['det x', 'det y', 'det z', 'signal', 'flat front', '(real - front)']
     fig, axs = plt.subplots(2,3, figsize = (10,10))
     for i in range(6):
         row = i%2
@@ -41,7 +84,10 @@ def show_pred(data, fake):
         axs[row][col].plot(fake.to('cpu').detach().numpy()[:,i], 'r')
         axs[row][col].plot(data.to('cpu').detach().numpy()[:,i], 'b')
         axs[row][col].legend(['fake', 'true'])
-        axs[row][col].set_title(f'chanal {i}')
+        axs[row][col].set_title(f'chanal {names[i]}')
+        axs
+    lenght_info = f'real_lenght {real_lenght}\nfake_lenght {fake_lenght}'
+    plt.suptitle(lenght_info)
     return fig
 
 def prepipline(config):
@@ -72,7 +118,11 @@ def train(config):
     mask = config['padding_value']
     show_index = config['show_index']
     koef_KL = config['koef_KL']
+    koef_DL = config['koef_DL']
+
     use_mask = config['use_mask']
+    stop_token = config['stop_token']
+    start_token = config['start_token']
     os.makedirs(PATH, exist_ok = True)
     iters = 0
     for epoch in range(epochs):
@@ -81,13 +131,16 @@ def train(config):
         for x in pbar:  # x должен быть пакетом последовательностей с заполнением
             x = x.to(device)
             optimizer.zero_grad()
-            recon_x, mu, log_var = model(x)
-            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask, use_mask=use_mask)
+            recon_x, mu, log_var, pred_num = model(x)
+            recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=mask, use_mask=use_mask)
+            num_det_loss *= koef_DL
             kl_divergence *= koef_KL
-            loss = recon_loss + kl_divergence
+            loss = recon_loss + kl_divergence + num_det_loss
             writer.add_scalar("train/Loss", loss, iters)
             writer.add_scalar("train/KL_loss", kl_divergence, iters)
             writer.add_scalar("train/recon_loss", recon_loss, iters)
+            writer.add_scalar("train/recon_loss", recon_loss, iters)
+            writer.add_scalar("train/num_det_loss", num_det_loss, iters)
             loss.backward()
             optimizer.step()
             pbar.set_description(f"TRAIN Epoch {epoch + 1}/{epochs}, Loss: {loss.item():.4f}")
@@ -96,29 +149,33 @@ def train(config):
         loss_mean = []
         KL_loss_mean = []
         recon_loss_mean = []
-        
+        num_det_loss_mean = []
         pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1}/{epochs}, Loss: 0.0")
         for x in pbar_val:  # x должен быть пакетом последовательностей с заполнением
             x = x.to(device)
-            recon_x, mu, log_var = model(x)
-            recon_loss, kl_divergence = Loss.vae_loss(recon_x, x, mu, log_var, mask=mask, use_mask = config['use_mask'])
+            recon_x, mu, log_var, pred_num = model(x)
+            recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=mask, use_mask = config['use_mask'])
             kl_divergence *= koef_KL
-            loss = recon_loss + kl_divergence
+            num_det_loss *= koef_DL
+            loss = recon_loss + kl_divergence + num_det_loss
             loss_mean.append(loss.item())
             KL_loss_mean.append(kl_divergence.item())
             recon_loss_mean.append(recon_loss.item())
+            num_det_loss_mean.append(num_det_loss.item())
             pbar_val.set_description(f"VAL Epoch {epoch + 1}/{epochs}, Loss: {loss.item():.4f}")
         torch.save(model.state_dict(), os.path.join(PATH, f'epoch_{epoch}'))
         print(f'Epoch {epoch + 1}, Loss: {np.array(loss_mean).mean()}')
         writer.add_scalar("val/Loss", np.array(loss_mean).mean(), epoch)
         writer.add_scalar("val/KL_loss", np.array(KL_loss_mean).mean(), epoch)
         writer.add_scalar("val/recon_loss", np.array(recon_loss_mean).mean(), epoch)
+        writer.add_scalar("val/num_det_loss", np.array(num_det_loss_mean).mean(), epoch)
 
         #show from last batch
         real = x[show_index]
         fake = recon_x[show_index]
+        num = pred_num[show_index]
         for i in range(len(show_index)):
-            fig = show_pred(real[i], fake[i])
+            fig = show_pred(real[i], fake[i], tokens = (start_token, stop_token, mask), lenght_predict = num[i])
             writer.add_figure(f"val/show_pred_{i}", fig, epoch)            
 
 if __name__ == '__main__':
