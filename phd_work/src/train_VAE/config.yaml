@@ -2,7 +2,7 @@ input_dim: 6
 hidden_dim: 256
 latent_dim: 64
 batch_size: 1500
-lr: 1e-2
+lr: 1e-3
 epoches: 200
 
 #for masking in dataloader
@@ -13,8 +13,12 @@ koef_KL: 0.0
 koef_DL: 0.1
 
 use_mask: True
-PATH: '../../Models_VAE/_test_mask_moreLR'
+PATH: '../../Models_VAE/encoder_and_decoder_LSTM_and_mu'
 show_index:
   - 10
   - 20
   - 30
+write_param:
+  - 'latent_dim'
+  - 'hidden_dim'
+  - 'use_mask'

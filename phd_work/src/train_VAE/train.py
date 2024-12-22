@@ -21,11 +21,22 @@ from typing import Optional, Tuple, Union
 
 from torch.utils.tensorboard import SummaryWriter
 import yaml
+import time
+def get_time() -> str:
+    sec = time.time()
+    struct = time.localtime(sec)
+    return time.strftime('%d.%m.%Y %H:%M', struct).replace(' ','_')
 
-def read_config(config: str = 'config.yaml'):
+def read_config(config: str = 'config.yaml') -> dict:
     with open(config, 'r') as file:
         hparams = yaml.safe_load(file)
     return hparams
+def get_params_str(config: dict) -> str:
+    write_param = config['write_param']
+    res=""
+    for p in write_param:
+        res += f'{p}={config[p]};_'
+    return res
 def clean_mask(data: torch.Tensor, tokens: Optional[Tuple[int, int, int]] =None, lenght: Optional[int]=None) -> torch.Tensor:
     """
     This function cleans a masked tensor by removing start, end, and mask tokens, and adjusting the length accordingly.
@@ -47,13 +58,10 @@ def clean_mask(data: torch.Tensor, tokens: Optional[Tuple[int, int, int]] =None,
     if st is not None:
         data = data[1:] # del first data
         lenght-=1
-    return data[:lenght], lenght
-
+    return data[:lenght], lenght   
     
-    
-        
-    
-def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None, lenght_predict: Union[np.ndarray, torch.Tensor] = None) -> plt.figure:
+def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None,
+               lenght_predict: Union[np.ndarray, torch.Tensor] = None) -> plt.figure:
     '''
     data - shape (det, featches)
 
@@ -65,7 +73,6 @@ def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None, lenght_pr
     #TODO переписать нормально
     data, real_lenght = clean_mask(data, tokens = tokens)
     if lenght_predict is not None:
-        print('lenght_predict', lenght_predict.shape)
         fake_lenght = float(lenght_predict)
         if tokens[0] is not None:
             # have start token
@@ -107,13 +114,14 @@ def prepipline(config):
     return {'train_loader': train_loader, 'val_loader': val_loader, 'model': model, 'optimizer': optimizer, 'writer': writer}
 # Цикл обучения (предполагается, что train_loader предоставляет пакеты последовательностей переменной длины)
 def train(config):
+    # add info in save path
+    PATH = config['PATH'] + get_time() + get_params_str(config)
     prepipline_dict = prepipline(config)
     train_loader = prepipline_dict['train_loader']
     val_loader = prepipline_dict['val_loader']
     model = prepipline_dict['model']
     optimizer = prepipline_dict['optimizer']
-    writer = prepipline_dict['writer'] 
-    PATH = config['PATH']
+    writer = prepipline_dict['writer']
     epochs = config['epoches']
     mask = config['padding_value']
     show_index = config['show_index']

@@ -13,17 +13,13 @@ class Embading(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim):
         super(Encoder, self).__init__()
-        self.lstm = nn.GRU(input_dim, hidden_dim, batch_first=True)
-        # self.lstm_seq = nn.ModuleList([nn.LSTM(hidden_dim_latent[0], hidden_dim_latent[1], batch_first=True),
-        #                            nn.LSTM(hidden_dim_latent[1], hidden_dim_latent[2], batch_first=True),
-        #                            nn.LSTM(hidden_dim_latent[2], hidden_dim, batch_first=True),
-        #                            ])
-        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.fc_mu = nn.Linear(hidden_dim*2, latent_dim)
+        self.fc_logvar = nn.Linear(hidden_dim*2, latent_dim)
     def forward(self, x):
         h, c_n = self.lstm(x)  # h_n shape: (1, batch_size, hidden_dim)
-        # for i in range(3):
-        #     h, (h_n, c_n) = self.lstm_seq[i](h)
+        # for LSTM
+        c_n = torch.concat((c_n[0], c_n[1]), dim=2)
         h_n = c_n.squeeze(0)  # убираем первую размерность
         mu = self.fc_mu(h_n)  # среднее латентного пространства
         log_var = self.fc_logvar(h_n)  # логарифм дисперсии латентного пространства
@@ -50,6 +46,7 @@ class DecoderRNN(nn.Module):
     def __init__(self, latent_dim, hidden_size, output_size, start_token: Tensor):
         super(DecoderRNN, self).__init__()
         self.lat2hid = nn.Linear(latent_dim, hidden_size)
+        self.lat2hid2 = nn.Linear(latent_dim, hidden_size)
         self.emb_fc = nn.Linear(output_size, hidden_size)
         # self.embedding = nn.Embedding(output_size, hidden_size)
         self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True)
@@ -68,13 +65,17 @@ class DecoderRNN(nn.Module):
         decoder_input = self.emb_fc(self.start_token).unsqueeze(1)# Zero input for the first timestep
         decoder_input = torch.repeat_interleave(decoder_input, batch_size, dim=0) # Repeat decoder_input for each timestep in the batch
         # decoder_input mast have shape (batch, 1, hidden_size)
+        encoder_hidden1 = self.lat2hid(encoder_hidden)
+        encoder_hidden1 = self.lrealu(encoder_hidden1) # ad for 1st exp
+        decoder_hidden1 = encoder_hidden1.unsqueeze(0) # Use last hidden state from encoder as initial hidden state for decoder
+        # for LSTM
+        encoder_hidden2 = self.lat2hid2(encoder_hidden)
+        encoder_hidden2 = self.lrealu(encoder_hidden2) # ad for 1st exp
+        decoder_hidden2 = encoder_hidden2.unsqueeze(0) # Use last hidden state from encoder as initial hidden state for decoder
 
-        # encoder_hidden = self.lat2hid(encoder_hidden)
-        # encoder_hidden = self.lrealu(encoder_hidden) # ad for 1st exp
-        decoder_hidden = encoder_hidden.unsqueeze(0) # Use last hidden state from encoder as initial hidden state for decoder
         decoder_outputs = []
         for i in range(seq_len):
-            decoder_output, decoder_hidden  = self.forward_step(decoder_input, decoder_hidden)    
+            decoder_output, decoder_hidden  = self.forward_step(decoder_input, (decoder_hidden1, decoder_hidden2))    
             decoder_input = decoder_output # detach from history as input
             decoder_output = self.out(decoder_output)
             decoder_outputs.append(decoder_output)
@@ -91,7 +92,7 @@ class DecoderRNN(nn.Module):
         # output = self.embedding(input)
         output = input
         output = torch.relu(output)
-        output, hidden = self.gru(output, hidden)
+        output, hidden = self.lstm(output, hidden)
         return output, hidden
 
 class VAE(nn.Module):
@@ -109,7 +110,8 @@ class VAE(nn.Module):
         seq_len = x.size(1)
         mu, log_var, (h_n, c_n) = self.encoder(x)
         z = self.reparameterize(mu, log_var, koef=1.0)
-        recon_x, _, num = self.decoder(z, h_n, seq_len)
+        #change second param
+        recon_x, _, num = self.decoder(z, mu, seq_len)
         return recon_x, mu, log_var, num
     @staticmethod
     def count_parameters(model):
