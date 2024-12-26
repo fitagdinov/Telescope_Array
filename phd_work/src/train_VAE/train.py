@@ -18,22 +18,51 @@ import model as Model
 import datasets as DataSet
 import loss as Loss
 from typing import Optional, Tuple, Union
+import pytorch_warmup as warmup
+from  torch.optim.lr_scheduler import ExponentialLR
 
 from torch.utils.tensorboard import SummaryWriter
 import yaml
 import time
 def get_time() -> str:
+    """
+    This function retrieves the current time and formats it into a string.
+
+    Parameters:
+    None
+
+    Returns:
+    str: The current time in the format 'dd.mm.yyyy_HH:MM'.
+    """
     sec = time.time()
     struct = time.localtime(sec)
     return time.strftime('%d.%m.%Y %H:%M', struct).replace(' ','_')
 
 def read_config(config: str = 'config.yaml') -> dict:
+    """
+    This function reads a configuration file in YAML format and returns its contents as a dictionary.
+
+    Parameters:
+    - config (str): The path to the configuration file. The default value is 'config.yaml'.
+
+    Returns:
+    dict: A dictionary containing the configuration parameters.
+    """
     with open(config, 'r') as file:
         hparams = yaml.safe_load(file)
     return hparams
 def get_params_str(config: dict) -> str:
+    """
+    This function generates a string representation of specific parameters from a given configuration dictionary.
+
+    Parameters:
+    - config (dict): A dictionary containing configuration parameters. It should contain a list of parameter names under the key 'write_param'.
+
+    Returns:
+    str: A string representation of the specified parameters in the format 'param1=value1;param2=value2;...'.
+    """
     write_param = config['write_param']
-    res=""
+    res = ""
     for p in write_param:
         res += f'{p}={config[p]};_'
     return res
@@ -116,6 +145,8 @@ def prepipline(config):
 def train(config):
     # add info in save path
     PATH = config['PATH'] + get_time() + get_params_str(config)
+    config['PATH'] = PATH
+    print("Saving Path: {}".format(PATH))
     prepipline_dict = prepipline(config)
     train_loader = prepipline_dict['train_loader']
     val_loader = prepipline_dict['val_loader']
@@ -133,6 +164,12 @@ def train(config):
     start_token = config['start_token']
     os.makedirs(PATH, exist_ok = True)
     iters = 0
+
+    # warmup NEED PYTHON >=3.9
+    # num_steps = len(train_loader) * epochs
+    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_steps)
+    # warmup_scheduler = warmup.UntunedLinearWarmup(optimizer)
+    # scheduler = ExponentialLR(optimizer, gamma=0.9, last_epoch=-1)
     for epoch in range(epochs):
         model.train()
         pbar = tqdm(train_loader, desc =f"TRAIN Epoch {epoch + 1}/{epochs}, Loss: 0.0")
@@ -147,12 +184,15 @@ def train(config):
             writer.add_scalar("train/Loss", loss, iters)
             writer.add_scalar("train/KL_loss", kl_divergence, iters)
             writer.add_scalar("train/recon_loss", recon_loss, iters)
-            writer.add_scalar("train/recon_loss", recon_loss, iters)
             writer.add_scalar("train/num_det_loss", num_det_loss, iters)
             loss.backward()
             optimizer.step()
             pbar.set_description(f"TRAIN Epoch {epoch + 1}/{epochs}, Loss: {loss.item():.4f}")
             iters += 1
+        # writer.add_scalar("LR",[i['lr'] for i in optim.param_groups][0], epoch)
+        # scheduler.step()
+            # with warmup_scheduler.dampening():
+            #     lr_scheduler.step()
         model.eval()
         loss_mean = []
         KL_loss_mean = []
@@ -182,7 +222,9 @@ def train(config):
         real = x[show_index]
         fake = recon_x[show_index]
         num = pred_num[show_index]
-        for i in range(len(show_index)):
+        for ii in range(len(show_index)):
+            # get from back side
+            i = -ii
             fig = show_pred(real[i], fake[i], tokens = (start_token, stop_token, mask), lenght_predict = num[i])
             writer.add_figure(f"val/show_pred_{i}", fig, epoch)            
 

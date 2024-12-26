@@ -72,10 +72,10 @@ class DecoderRNN(nn.Module):
         encoder_hidden2 = self.lat2hid2(encoder_hidden)
         encoder_hidden2 = self.lrealu(encoder_hidden2) # ad for 1st exp
         decoder_hidden2 = encoder_hidden2.unsqueeze(0) # Use last hidden state from encoder as initial hidden state for decoder
-
+        decoder_hidden =  (decoder_hidden1, decoder_hidden2)
         decoder_outputs = []
         for i in range(seq_len):
-            decoder_output, decoder_hidden  = self.forward_step(decoder_input, (decoder_hidden1, decoder_hidden2))    
+            decoder_output, decoder_hidden  = self.forward_step(decoder_input, decoder_hidden)    
             decoder_input = decoder_output # detach from history as input
             decoder_output = self.out(decoder_output)
             decoder_outputs.append(decoder_output)

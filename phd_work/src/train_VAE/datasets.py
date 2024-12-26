@@ -49,7 +49,21 @@ def get_params_mask(config):
     stop_token = config['stop_token']
     padding_value = config['padding_value']
 
-    start_token = torch.ones((1,6)) * start_token
+    if isinstance(start_token,int):
+        start_token = torch.ones((1,6)) * start_token
+    elif isinstance(start_token, str):
+    
+        if start_token == 'hard_v1':
+            # TODO: change 
+            # signal min -0.277908
+            # flat min -8.798042
+            # real-flat max 15.595449
+            start_token = torch.tensor([0, 0, 0, -0.277908, -8.798042, 15.595449]).unsqueeze(0)
+        else:
+            raise ValueError(f"Unknown start_token: {start_token}")
+    else:
+        raise ValueError(f"Unknown start_token: {start_token}")
+
     stop_token = torch.ones((1,6)) * stop_token
     return {'start_token': start_token, 'stop_token': stop_token, 'padding_value': padding_value}
 
