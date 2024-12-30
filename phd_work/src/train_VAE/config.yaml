@@ -12,9 +12,10 @@ start_token: hard_v1
 koef_KL: 0.0
 koef_DL: 0.1
 
+koef_loss: [1,1,0,1,1,1]
 
 use_mask: True
-PATH: '../../Models_VAE/encoder_and_decoder_LSTM_NEW_start_token'
+PATH: '../../Models_VAE/prepocces_signal'
 show_index:
   - 10
   - 20

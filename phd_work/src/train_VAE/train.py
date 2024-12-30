@@ -162,6 +162,8 @@ def train(config):
     use_mask = config['use_mask']
     stop_token = config['stop_token']
     start_token = config['start_token']
+    koef_loss = torch.tensor(config['koef_loss']).unsqueeze(0).to('cpu')
+    koef_loss = koef_loss.to(device)
     os.makedirs(PATH, exist_ok = True)
     iters = 0
 
@@ -177,7 +179,8 @@ def train(config):
             x = x.to(device)
             optimizer.zero_grad()
             recon_x, mu, log_var, pred_num = model(x)
-            recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=mask, use_mask=use_mask)
+            recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=mask,
+                                                                     use_mask=use_mask, koef_loss=koef_loss)
             num_det_loss *= koef_DL
             kl_divergence *= koef_KL
             loss = recon_loss + kl_divergence + num_det_loss
@@ -202,7 +205,7 @@ def train(config):
         for x in pbar_val:  # x должен быть пакетом последовательностей с заполнением
             x = x.to(device)
             recon_x, mu, log_var, pred_num = model(x)
-            recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=mask, use_mask = config['use_mask'])
+            recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=mask, use_mask = config['use_mask'], koef_loss=koef_loss )
             kl_divergence *= koef_KL
             num_det_loss *= koef_DL
             loss = recon_loss + kl_divergence + num_det_loss

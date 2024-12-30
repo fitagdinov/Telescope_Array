@@ -1,5 +1,6 @@
 # Функция потерь
 from torch import nn
+from typing import Optional
 import torch 
 mse = torch.nn.MSELoss(reduction='mean')
 def calc_det(x, mask_v = -10.0, start_stop_teken:bool = True, use_mask: bool = True):
@@ -23,8 +24,12 @@ def Num_Det_Loss(lengths_real: torch.Tensor, lenght_fake: torch.Tensor):
     loss = mse(lengths_real, lenght_fake)
     return loss
 
-def vae_loss(recon_x, x, mu, log_var, pred_num, mask = -10.0, use_mask: bool = True):
+def vae_loss(recon_x, x, mu, log_var, pred_num, mask = -10.0, use_mask: bool = True, koef_loss: Optional[torch.Tensor] = None):
+    if koef_loss is None:
+        koef_loss = torch.ones(1,6)
+    koef_loss = koef_loss.unsqueeze(0)
     recon_loss = nn.MSELoss(reduction='none')(recon_x, x) # return shape - batch, det, featch
+    recon_loss *= koef_loss
     kl_divergence = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
     # подсчет кол-ва детекторов в событии
     # mask = calc_det(x, mask)

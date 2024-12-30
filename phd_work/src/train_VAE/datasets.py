@@ -3,20 +3,24 @@ from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 import h5py as h5
 from torch.nn.utils.rnn import pad_sequence
+import numpy as np
 
 class VariableLengthDataset(Dataset):
     def __init__(self, data_path, mode):
         """
         Args:
-            data: список тензоров, где каждый тензор имеет форму (seq_len, 5)
+            data: список тензоров, где каждый тензор имеет форму (seq_len, 6)
         """
         data, ev_starts = self.read_h5(data_path, mode)
+        # prepoccessing
+        data = self.preprocc_signal(data, 3)
         self.data = data
         self.ev_starts = ev_starts
-
     def __len__(self):
         return len(self.ev_starts)-1
-
+    def preprocc_signal(self, data: np.ndarray, ch: int = 3) -> np.ndarray:
+        data[:,ch] = np.log(data[:,ch] - data[:,ch].min()+1e-6)
+        return data
     def __getitem__(self, idx):
         st = self.ev_starts[idx]
         fn = self.ev_starts[idx + 1]
