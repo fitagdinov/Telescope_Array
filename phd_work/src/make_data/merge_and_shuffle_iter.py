@@ -2,33 +2,27 @@ import numpy as np
 import h5py as h5
 import random as rd
 from tqdm import tqdm
+import os
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(filename='myapp.log', level=logging.INFO)
 MC_dir_path = '/home/rfit/Telescope_Array/phd_work/data/filtered/'
-#MC_dir_path = '/home3/ivkhar/TA/data/MC/filtered/gamma_search/'
-#h5s = [
-#       'pr_epos_14yr_1895_0110_excl_sat_T_excl_geo_T.h5',
-#       'pr_sibyll_14yr_1745_0110_excl_sat_T_excl_geo_T.h5',
-#       'pr_q4_14yr_1895_0010_excl_sat_T_excl_geo_T.h5',
-#       'fe_epos_14yr_1895_0110_excl_sat_T_excl_geo_T.h5',
-#       'fe_sibyll_14yr_1745_0110_excl_sat_T_excl_geo_T.h5',
-#       'fe_q4_14yr_1895_0010_excl_sat_T_excl_geo_T.h5',
-#       'fe_q3_9yr_0110_excl_sat_T_excl_geo_T.h5',
-#       'pr_q3_9yr_0110_excl_sat_T_excl_geo_T.h5'
-#          ]
 
-ps = ['pr']
-#ms = ['epos','q4','sibyll']
+ps = ['pr','fe']
 ms = ['q4']
 es = ['e1']
-h5s = [ p+'_'+m+'_14yr_'+e+'_1000_excl_sat_T_excl_geo_T.h5' for p in ps for m in ms for e in es ]
-h5s = ['pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5']
+h5s = [ p+'_'+m+'_14yr_'+e+'_0110_excl_sat_F_excl_geo_F.h5' for p in ps for m in ms for e in es ]
 models_ids = np.array([ m for p in ps for m in ms for e in es ]).astype('<S6')
-
 h5s = [ MC_dir_path+p for p in h5s ]
-h5_out = '/home/rfit/Telescope_Array/phd_work/data/merged/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
-
+print(logger, __name__)
+logger.info(os.listdir(MC_dir_path))
+h5dir = '/home3/rfit/Telescope_Array/phd_work/data/merged/'
+os.makedirs(h5dir, exist_ok=True)
+h5_out = '_'.join(ps+ms+es) + '_0110_excl_sat_F_excl_geo_F.h5'
+h5_out = os.path.join(h5dir, h5_out)
 write_step = 500000
-
-keys_to_pull = ['ev_ids','reco_rubtsov','reco_rubtsov_params','bdt_params','mc_params','dt_params','dt_wfs','dt_ids', 'dt_mask']
+print('IN', h5s, "OUT ", h5_out)
+keys_to_pull = ['ev_ids','reco_rubtsov','reco_rubtsov_params','mc_params','dt_params','dt_wfs','dt_ids', 'dt_mask'] #bdt_params
 keys_to_pull += ['reco_ivanov','reco_ivanov_params']
 
 # get nums evs
@@ -73,7 +67,7 @@ with h5.File(h5_out,'w') as ho:
         proc = 0
         proc_hits = 0
         while proc<total_num:
-            print(proc,total_num)
+            print(proc,total_num, key)
             # init
             step = min(write_step,total_num-proc)
             shfl_cycle = shfl[proc:proc+step]

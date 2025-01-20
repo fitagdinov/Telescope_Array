@@ -2,8 +2,8 @@ import numpy as np
 import h5py as h5
 
 use_wf_16 = True
-
-h5f = '/home/rfit/Telescope_Array/phd_work/data/bundled/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F_bundled.h5'
+h5_in = 'pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
+h5f = '/home3/rfit/Telescope_Array/phd_work/data/bundled/' + h5_in
 num_evs = 200000
 keys_evs = ['recos','det_max_wf','det_max_params']
 keys_hits = ['dt_params','wfs_flat']
@@ -30,14 +30,15 @@ with h5.File(h5f,'a') as hf:
         hf.create_dataset('norm_param/'+key+'/mean', data=mean, dtype=dtype )
         hf.create_dataset('norm_param/'+key+'/std', data=std, dtype=dtype )
     # dt bundle
-    data = hf['dt_bundle'][:num_evs]
-    mask = data[:,:,:,-1].astype(bool)
-    data = data[:,:,:,:-1][mask]
-    mean = np.mean(data, axis=tuple(range(len(data.shape)-1)), dtype=np.float64)
-    std = np.std(data, axis=tuple(range(len(data.shape)-1)), dtype=np.float64)
-    mean = np.concatenate((mean,[0]))
-    std = np.concatenate((std,[1]))
-    hf.create_dataset('norm_param/dt_bundle/mean', data=mean, dtype=np.float32 )
-    hf.create_dataset('norm_param/dt_bundle/std', data=std, dtype=np.float32 )
+    if False:
+        data = hf['dt_bundle'][:num_evs]
+        mask = data[:,:,:,-1].astype(bool)
+        data = data[:,:,:,:-1][mask]
+        mean = np.mean(data, axis=tuple(range(len(data.shape)-1)), dtype=np.float64)
+        std = np.std(data, axis=tuple(range(len(data.shape)-1)), dtype=np.float64)
+        mean = np.concatenate((mean,[0]))
+        std = np.concatenate((std,[1]))
+        hf.create_dataset('norm_param/dt_bundle/mean', data=mean, dtype=np.float32 )
+        hf.create_dataset('norm_param/dt_bundle/std', data=std, dtype=np.float32 )
     
     print(hf.keys())

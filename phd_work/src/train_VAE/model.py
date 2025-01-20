@@ -11,13 +11,27 @@ class Embading(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim):
+    def __init__(self, input_dim, hidden_dim, latent_dim, lstm2: bool = False, lstm3: bool = False):
         super(Encoder, self).__init__()
-        self.lstm = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.lstm1 = nn.LSTM(input_dim, hidden_dim, batch_first=True)
         self.fc_mu = nn.Linear(hidden_dim*2, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim*2, latent_dim)
+        self.lstm2 = None
+        self.lstm3 = None
+        if lstm2:
+            self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        if lstm3:
+            self.lstm3 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+    def seq_LSTMs(self, x):
+        h, c_n = self.lstm1(x) 
+        if self.lstm2 is not None:
+            h, c_n = self.lstm2(h)
+        if self.lstm3 is not None:
+            h, c_n = self.lstm3(h)
+        return h, c_n
+
     def forward(self, x):
-        h, c_n = self.lstm(x)  # h_n shape: (1, batch_size, hidden_dim)
+        h, c_n = self.seq_LSTMs(x)  # h_n shape: (1, batch_size, hidden_dim)
         # for LSTM
         c_n = torch.concat((c_n[0], c_n[1]), dim=2)
         h_n = c_n.squeeze(0)  # убираем первую размерность
@@ -25,32 +39,16 @@ class Encoder(nn.Module):
         log_var = self.fc_logvar(h_n)  # логарифм дисперсии латентного пространства
         return mu, log_var, (h_n, c_n)
     
-
-class Decoder(nn.Module):
-    def __init__(self, latent_dim, hidden_dim, output_dim):
-        super(Decoder, self).__init__()
-        self.fc = nn.Linear(latent_dim, hidden_dim)
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
-        self.output_layer = nn.Linear(hidden_dim, output_dim)
-    def forward(self, z, seq_len):
-        h = torch.relu(self.fc(z)).unsqueeze(1)  # (batch_size, 1, hidden_dim)
-        h = h.repeat(1, seq_len, 1)  # Повторяем скрытое состояние для каждого шага времени
-        lstm_out, _ = self.lstm(h)  # Проходим через LSTM
-        
-        return self.output_layer(lstm_out)
-    
 class DecoderRNN(nn.Module):
     '''
     get from https://pytorch.org/tutorials/intermediate/seq2seq_translation_tutorial.html
     '''
-    def __init__(self, latent_dim, hidden_size, output_size, start_token: Tensor):
+    def __init__(self, latent_dim, hidden_size, output_size, start_token: Tensor, lstm2: bool = False, lstm3: bool = False):
         super(DecoderRNN, self).__init__()
         self.lat2hid = nn.Linear(latent_dim, hidden_size)
         self.lat2hid2 = nn.Linear(latent_dim, hidden_size)
         self.emb_fc = nn.Linear(output_size, hidden_size)
-        # self.embedding = nn.Embedding(output_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size, batch_first=True)
-        self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        self.lstm1 = nn.LSTM(hidden_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.lrealu = torch.nn.LeakyReLU(negative_slope=0.01, inplace=False)
         self.max_lenght = 100  # Maximum length of the output sequence
@@ -59,6 +57,13 @@ class DecoderRNN(nn.Module):
         self.fc_seq = nn.Linear(latent_dim, hidden_size)
         self.fc_seq2 = nn.Linear(hidden_size, 1)
         self.relu = nn.ReLU()
+
+        self.lstm2 = None
+        self.lstm3 = None
+        if lstm2:
+            self.lstm2 = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        if lstm3:
+            self.lstm3 = nn.LSTM(hidden_size, hidden_size, batch_first=True)
     def forward(self, encoder_outputs, encoder_hidden, seq_len):
         # start_token shape (1,6)
         batch_size = encoder_outputs.size(0)
@@ -87,20 +92,28 @@ class DecoderRNN(nn.Module):
         num = self.fc_seq2(num)
         num = self.relu(num)
         return decoder_outputs, decoder_hidden, num
+    def seq_LSTMs(self, x, hidden = None):
+        h, c_n = self.lstm1(x, hidden) 
+        if self.lstm2 is not None:
+            h, c_n = self.lstm2(h, c_n)
+        if self.lstm3 is not None:
+            h, c_n = self.lstm3(h, c_n)
+        return h, c_n
 
     def forward_step(self, input, hidden):
         # output = self.embedding(input)
         output = input
         output = torch.relu(output)
-        output, hidden = self.lstm(output, hidden)
+        # output, hidden = self.lstm(output, hidden)
+        output, hidden = self.seq_LSTMs(output, hidden)
         return output, hidden
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=5, hidden_dim=32, latent_dim=1, start_token: Tensor = torch.zeros(1,6)) -> None:
+    def __init__(self, input_dim=5, hidden_dim=32, latent_dim=1, start_token: Tensor = torch.zeros(1,6), lstm2: bool = False, lstm3: bool = False) -> None:
         super(VAE, self).__init__()
-        self.encoder = Encoder(input_dim, hidden_dim, latent_dim)
+        self.encoder = Encoder(input_dim, hidden_dim, latent_dim, lstm2=lstm2, lstm3=lstm3 )
         # self.decoder = Decoder(latent_dim, hidden_dim, input_dim, hidden_dim_latent)
-        self.decoder = DecoderRNN(latent_dim, hidden_dim, input_dim, start_token)
+        self.decoder = DecoderRNN(latent_dim, hidden_dim, input_dim, start_token, lstm2=lstm2, lstm3=lstm3 )
         print("Encoder has params:", self.count_parameters(self.encoder),"Decoder has params:", self.count_parameters(self.decoder))
     def reparameterize(self, mu, log_var, koef=1):
         std = torch.exp(0.5 * log_var)
@@ -116,3 +129,7 @@ class VAE(nn.Module):
     @staticmethod
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    def load(self, path):
+        if path is not None:
+            self.load_state_dict(torch.load(path))
+        
