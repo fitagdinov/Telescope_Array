@@ -23,8 +23,25 @@ def Num_Det_Loss(lengths_real: torch.Tensor, lenght_fake: torch.Tensor):
     # assert lengths_real.shape = 
     loss = mse(lengths_real, lenght_fake)
     return loss
+def Metric_detection(lengths_real: torch.Tensor, lenght_fake: torch.Tensor,
+                    method_v:int = 3):
+    assert lengths_real.shape == lenght_fake.shape, "lengths_real and lenght_fake must have same shape"
+    lengths_real = lengths_real.type(torch.long) 
+    lenght_fake = lenght_fake.type(torch.long)
+    if method_v == 3:
+        diff = torch.abs(lengths_real - lenght_fake)/lengths_real
+        metric = diff
+    else: 
+        raise ValueError("Unknown method_v: %d" % method_v)
+    return diff
 
-def vae_loss(recon_x, x, mu, log_var, pred_num, mask = -10.0, use_mask: bool = True, koef_loss: Optional[torch.Tensor] = None):
+
+
+def vae_loss(recon_x, x, mu, log_var, pred_num, mask = -10.0, use_mask: bool = True,
+            koef_loss: Optional[torch.Tensor] = None, 
+            reduction: Optional[str] = None,
+            get_det_metric: Optional[bool] = False
+            ):
     if koef_loss is None:
         koef_loss = torch.ones(1,6)
     koef_loss = koef_loss.unsqueeze(0)
@@ -38,10 +55,25 @@ def vae_loss(recon_x, x, mu, log_var, pred_num, mask = -10.0, use_mask: bool = T
         recon_loss*=num_det_mask
         num_det = torch.sum(num_det_mask, dim=1)[:,0][:,None, None]
         recon_loss = torch.sum(recon_loss/num_det, dim=1) # mean by active det
-        recon_loss = torch.mean(recon_loss) # mean by batch and featches
+        if isinstance(reduction, str):
+            if reduction == 'none':
+                recon_loss = torch.mean(recon_loss, dim=1)
+            else:
+                raise ValueError('reduction must have only defined values. See loss.py file')
+        else:
+            recon_loss = torch.mean(recon_loss) # mean by batch and featches
         # loss for predict num active detections
         num_det_loss = Num_Det_Loss(num_det[:,:,0].float(), pred_num)
+        if get_det_metric:
+            metric = Metric_detection(num_det[:,:,0].float(), pred_num)
+            return recon_loss, kl_divergence / x.size(0), num_det_loss, metric
         return recon_loss, kl_divergence / x.size(0), num_det_loss
     else:
         recon_loss = torch.mean(recon_loss) # mean by active det
+        if isinstance(reduction, str):
+            if reduction == 'none':
+                print('here')
+                recon_loss = recon_loss
+            else:
+                raise ValueError('reduction must have only defined values. See loss.py file')
         return recon_loss, kl_divergence / x.size(0), num_det_loss

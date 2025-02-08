@@ -1,5 +1,5 @@
 import torch
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 import h5py as h5
@@ -7,17 +7,20 @@ from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 
 class VariableLengthDataset(Dataset):
-    def __init__(self, data_path:str, mode:str, mc_params:bool = False):
+    def __init__(self, data_path:str, mode:str, mc_params:bool = False, particles: Optional[List[str]] = None, mc_params_return:bool = False):
         """
         Args:
             data: список тензоров, где каждый тензор имеет форму (seq_len, 6)
         """
+        self.particles = particles
+        print('particles', self.particles)
         data, ev_starts, mc_params = self.read_h5(data_path, mode, mc_params)
         # prepoccessing
         # data = self.preprocc_signal(data, 3)
         self.data = data
         self.ev_starts = ev_starts
         self.mc_params = mc_params
+        self.mc_params_return = mc_params_return
     def __len__(self):
         return len(self.ev_starts)-1
     def preprocc_signal(self, data: np.ndarray, ch: int = 3) -> np.ndarray:
@@ -26,23 +29,41 @@ class VariableLengthDataset(Dataset):
     def __getitem__(self, idx):
         st = self.ev_starts[idx]
         fn = self.ev_starts[idx + 1]
-        if self.mc_params is not None:
+        if self.mc_params_return:
             mc_params = self.mc_params[idx]
             return torch.tensor(self.data[st:fn]), torch.tensor(mc_params)
         else:
-            return torch.tensor(self.data[st:fn])
+            return torch.tensor(self.data[st:fn]),None
     def read_h5(self, data_path, mode, mc_params):
         with h5.File(data_path,'r') as f:
             print('keys', list(f.keys()))
             train = f[mode]
-            dt_params = train['dt_params'][()]
-            ev_starts = train['ev_starts'][()]
+            dt_params = torch.tensor(train['dt_params'][()]).to('cpu')
+            ev_starts = torch.tensor(train['ev_starts'][()]).to('cpu')
             if mc_params:
-                mc_params = train['mc_params'][()]
+                mc_params =  torch.tensor(train['mc_params'][()]).to('cpu')
             else: 
                 mc_params = None
+        if not(self.particles is None):
+            ev_starts, mc_params = self.cut_ev_start(self.particles, ev_starts, mc_params)
         return dt_params, ev_starts, mc_params
-    
+    def str2mass(self, name: List[str]) -> List[int]:
+        #1. mc_parttype (CORSIKA, 1 - gamma, 14 - proton, 5626 - Fe)
+        mass_dict = {'pr': 14,
+                     'photon': 1,
+                     'fe': 5626}
+        return [mass_dict[n] for n in name]
+    def cut_ev_start(self, name: List[str], ev_starts, mc_params, par_num: int = 1):
+        mass = self.str2mass(name)
+        where = torch.zeros((0,), dtype=torch.long)
+        for i,m in enumerate(mass):
+            where_ = torch.where(mc_params[:,par_num].to('cpu') == m)[0]
+            print(name[i], len(where_))
+            where = torch.concat((where, where_))
+        print('all', len(where),where)
+        ev_starts = ev_starts[where]
+        mc_params = mc_params[where]
+        return ev_starts, mc_params
     
 def get_params_mask(config):
     """
@@ -83,7 +104,7 @@ def get_params_mask(config):
     return {'start_token': start_token, 'stop_token': stop_token, 'padding_value': padding_value}
 
 # @wrapper_func()
-def collate_fn_many_args(batch: Tensor, start_token: Tensor, stop_token: Tensor, padding_value: int, mc_params: bool = False) -> Tensor:
+def collate_fn_many_args(batch: Tensor, start_token: Tensor, stop_token: Tensor, padding_value: int, mc_params_return: bool = False) -> Tensor:
     #, padding_value, star_token, stop_toke
     """
     Кастомная функция для DataLoader, которая заполняет последовательности до максимальной длины в батче.
@@ -92,7 +113,7 @@ def collate_fn_many_args(batch: Tensor, start_token: Tensor, stop_token: Tensor,
     """
     # start_token, stop_token = torch.zeros((1,6)), torch.zeros((1,6))
     # Извлекаем каждую последовательность в батче
-    if mc_params:
+    if mc_params_return:
         sequences = []
         params = None
         for item, par in batch:
@@ -105,10 +126,10 @@ def collate_fn_many_args(batch: Tensor, start_token: Tensor, stop_token: Tensor,
         padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=padding_value)  # (batch_size, max_seq_len, 5)
         return padded_sequences, torch.tensor(params)
     else: 
-        sequences = [torch.cat((start_token, item, stop_token), dim=0) for item in batch]
+        sequences = [torch.cat((start_token, item[0] , stop_token), dim=0) for item in batch]
         # Заполняем последовательности до одинаковой длины
         padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=padding_value)  # (batch_size, max_seq_len, 5)
-        return padded_sequences
+        return padded_sequences, None
 def wrapper_mask(func, *args, **kwargs):
     """
     A wrapper function that adds start and stop tokens to each sequence in a batch and pads them to the same length.

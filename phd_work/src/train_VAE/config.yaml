@@ -1,12 +1,13 @@
 input_dim: 6
 hidden_dim: 512
 latent_dim: 16
-batch_size: 1500
+batch_size: 350
 lr: 1e-3
-epoches: 1000
+epoches: 300
 lstm2: False
-#data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
+# data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
 data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
+# data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
 #for masking in dataloader
 padding_value: -11.0
 stop_token: -10.0
@@ -15,9 +16,13 @@ koef_KL: 0.0
 koef_DL: 0.1
 
 koef_loss: [1,1,0,1,1,1]
-
+used_particles:
+  - pr
+  - fe
+  # - photon
 use_mask: True
-PATH: '../../Models_VAE/Fe_Pr'
+get_det_metric: True
+PATH: '../../Models_VAE/Pr_photon'
 show_index:
   - 10
   - 20
@@ -25,6 +30,6 @@ show_index:
 write_param:
   - 'latent_dim'
   - 'hidden_dim'
-  - 'use_mask'
+  - 'used_particles'
 chpt: None
 # chpt: /home/rfit/Telescope_Array/phd_work/Models_VAE/test_2LSTM16.01.2025_17:12latent_dim=16;_hidden_dim=256;_use_mask=True;_/best
