@@ -23,3 +23,4 @@ phd_work/Models_VAE/
 phd_work/src/train_VAE/runs/
 *.pyc
 
+phd_work/src/train_VAE/runs2/

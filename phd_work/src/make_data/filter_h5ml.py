@@ -3,7 +3,7 @@ import h5py as h5
 import os
 from tqdm import tqdm
 MC_dir_path = '/home/rfit/Telescope_Array/phd_work/data/'
-h5_in = 'fe_q4_14yr_e1.h5'
+h5_in = 'pr_sibyll_14yr_1895.h5'
 
 # passed cuts: anisotropy, spectrum, composition, gamma
 # anisotropy, spectrum, composition, gamma
@@ -16,9 +16,10 @@ keys_to_pull = ['ev_ids','reco_rubtsov','reco_rubtsov_params','bdt_params','dt_p
 keys_to_pull += ['mc_params','reco_ivanov','reco_ivanov_params']
 
 h5_out = h5_in[:-3]+'_'+''.join([str(f) for f in filt_cuts])+'_excl_sat_'+str(exclude_saturated)[0]+'_excl_geo_'+str(exclude_geom_fit)[0]+'.h5'
-h5_in = MC_dir_path+'h5s/'+h5_in
-h5_out = MC_dir_path+'filtered/'+h5_out
-
+h5_in = os.path.join('/home3/ivkhar/TA/data/MC/h5s/', h5_in)
+# h5_in = MC_dir_path+'h5s/'+h5_in
+h5_out = MC_dir_path.replace('home', 'home3')+'filtered/'+h5_out
+os.makedirs(MC_dir_path.replace('home', 'home3')+'filtered/', exist_ok=True)
 # ensure that there are no anomaleous events
 E_cut = 2e3
 time_up = 0.9*1e5

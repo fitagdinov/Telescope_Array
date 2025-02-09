@@ -1,8 +1,10 @@
 import numpy as np
 import h5py as h5
 import os
-h5_in = '/home3/rfit/Telescope_Array/phd_work/data/bundled/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
-h5_out = '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
+import time
+h5_in = '/home3/rfit/Telescope_Array/phd_work/data/bundled/pr_q4_epos_sibyll_e1_0110_excl_sat_F_excl_geo_F.h5'
+h5_out =  h5_in.replace('bundled', 'normed')
+#'/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_epos_sibyll_e1_0110_excl_sat_F_excl_geo_F.h5'
 os.makedirs('/home3/rfit/Telescope_Array/phd_work/data/normed/', exist_ok=True)
 print(os.path.exists(h5_in))
 iter_step = 250000
@@ -21,6 +23,7 @@ keys_pull = ['ev_ids','mc_params', 'dt_mask']
 dsets = ['train','test','val']
 
 proc = 0
+s=time.time()
 with h5.File(h5_in,'r') as hi, h5.File(h5_out,'w') as ho:
     # get from where to start
     
@@ -80,3 +83,4 @@ with h5.File(h5_in,'r') as hi, h5.File(h5_out,'w') as ho:
     for key in keys_hits:
         ho.create_dataset('norm_param/'+key+'/mean', data=hi['norm_param/'+key+'/mean'][()])
         ho.create_dataset('norm_param/'+key+'/std', data=hi['norm_param/'+key+'/std'][()])
+print(time.time()-s)

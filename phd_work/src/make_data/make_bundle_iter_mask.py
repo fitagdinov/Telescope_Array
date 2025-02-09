@@ -6,7 +6,7 @@ from tqdm import tqdm
 take_log_wf = True
 reco_key = 'reco_ivanov'
 iter_step = 100000
-h5_in = 'pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
+h5_in = 'pr_q4_epos_sibyll_e1_0110_excl_sat_F_excl_geo_F.h5'
 h5_out = h5_in#[:-3]+'_bundled.h5'
 MC_dir_path_ROBERT = '/home3/rfit/Telescope_Array/phd_work/data/'
 h5_in = os.path.join(MC_dir_path_ROBERT, 'merged/', h5_in)

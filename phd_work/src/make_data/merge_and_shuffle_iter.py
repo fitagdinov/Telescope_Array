@@ -4,24 +4,25 @@ import random as rd
 from tqdm import tqdm
 import os
 import logging
+from glob import glob
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='myapp.log', level=logging.INFO)
-MC_dir_path = '/home/rfit/Telescope_Array/phd_work/data/filtered/'
+MC_dir_path = '/home3/rfit/Telescope_Array/phd_work/data/filtered/'
 
-ps = ['pr','fe']
-ms = ['q4']
+ps = ['pr']
+ms = ['q4', 'epos', 'sibyll']
 es = ['e1']
-h5s = [ p+'_'+m+'_14yr_'+e+'_0110_excl_sat_F_excl_geo_F.h5' for p in ps for m in ms for e in es ]
+# h5s = [ p+'_'+m+'_14yr_'+e+'_0110_excl_sat_F_excl_geo_F.h5' for p in ps for m in ms for e in es ]
+
 models_ids = np.array([ m for p in ps for m in ms for e in es ]).astype('<S6')
-h5s = [ MC_dir_path+p for p in h5s ]
-print(logger, __name__)
-logger.info(os.listdir(MC_dir_path))
+# h5s = [ MC_dir_path+p for p in h5s ]
+h5s = glob(MC_dir_path + '*1895*')
+logging.info(h5s)
 h5dir = '/home3/rfit/Telescope_Array/phd_work/data/merged/'
 os.makedirs(h5dir, exist_ok=True)
 h5_out = '_'.join(ps+ms+es) + '_0110_excl_sat_F_excl_geo_F.h5'
 h5_out = os.path.join(h5dir, h5_out)
 write_step = 500000
-print('IN', h5s, "OUT ", h5_out)
 keys_to_pull = ['ev_ids','reco_rubtsov','reco_rubtsov_params','mc_params','dt_params','dt_wfs','dt_ids', 'dt_mask'] #bdt_params
 keys_to_pull += ['reco_ivanov','reco_ivanov_params']
 
