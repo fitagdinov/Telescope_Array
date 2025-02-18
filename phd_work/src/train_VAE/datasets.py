@@ -1,17 +1,23 @@
 import torch
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
 import h5py as h5
 from torch.nn.utils.rnn import pad_sequence
 import numpy as np
-
+from tqdm import tqdm
 class VariableLengthDataset(Dataset):
-    def __init__(self, data_path:str, mode:str, mc_params:bool = False):
+    def __init__(self, data_path:str, mode:str, mc_params:bool = False, paticles: Optional[List[str]] = None):
         """
         Args:
             data: список тензоров, где каждый тензор имеет форму (seq_len, 6)
         """
+        
+        self.mass_dict = {'pr': 14,
+                     'photon': 1,
+                     'fe': 5626}
+        self.paticles = paticles
+        print('mc_params',mc_params)
         data, ev_starts, mc_params = self.read_h5(data_path, mode, mc_params)
         # prepoccessing
         # data = self.preprocc_signal(data, 3)
@@ -35,14 +41,84 @@ class VariableLengthDataset(Dataset):
         with h5.File(data_path,'r') as f:
             print('keys', list(f.keys()))
             train = f[mode]
-            dt_params = train['dt_params'][()]
-            ev_starts = train['ev_starts'][()]
+            dt_params = torch.tensor(train['dt_params'][()])
+            ev_starts = torch.tensor(train['ev_starts'][()])
             if mc_params:
-                mc_params = train['mc_params'][()]
-            else: 
-                mc_params = None
+                mc_params = torch.tensor(train['mc_params'][()])
+                if self.paticles is not None:
+                    dt_params, ev_starts, mc_params = self.choise_def_particles(self.paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=True)
+            else:
+                mc_params = torch.tensor(train['mc_params'][()])
+                print('self.paticles', self.paticles)
+                if self.paticles is not None:
+                    dt_params, ev_starts = self.choise_def_particles(self.paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=False)
+            mc_params = None
         return dt_params, ev_starts, mc_params
-    
+    def str2mass(self, name: List[str]) -> List[int]:
+        #1. mc_parttype (CORSIKA, 1 - gamma, 14 - proton, 5626 - Fe)
+        mass_dict = self.mass_dict
+        return [mass_dict[n] for n in name]
+    def choise_def_particles_2(self, name: List[str],data, ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
+        mass = self.str2mass(name)
+        data_shape = list(data.shape)
+        data_shape[0]=0
+        data_shape=tuple(data_shape)
+        data_new = torch.zeros(data_shape, dtype=data.dtype, device=data.device)
+        ev_starts_new = torch.tensor([0], dtype=torch.long)
+        if get_mc_params:
+            mc_params_shape = list(mc_params.shape)
+            mc_params_shape[0]=0
+            mc_params_shape=tuple(mc_params_shape)
+            mc_params_new = torch.zeros(mc_params_shape, dtype=mc_params.dtype, device=mc_params.device)
+        for i in tqdm(range(len(mc_params))):
+            p=mc_params[i,par_num]
+            if p in mass:
+                ev_s = ev_starts[i]
+                ev_f = ev_starts[i+1]
+                data_new = torch.concat([data_new, data[ev_s:ev_f]], dim=0)
+                ev_starts_new = torch.concat([ev_starts_new, torch.tensor([ev_f-ev_s], dtype=torch.long)])
+                if get_mc_params:
+                    mc_params_new = torch.concat([mc_params_new, mc_params[i]], dim=1)
+        if get_mc_params:
+            return data_new, ev_starts_new, mc_params_new
+        else:
+            return data_new, ev_starts_new
+    def choise_def_particles(self, name: List[str], data, ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
+        # Преобразуем имена частиц в массы
+        mass = self.str2mass(name)
+        
+        # Создаем маску для выбора нужных частиц
+        mask = torch.isin(mc_params[:, par_num], torch.tensor(mass, device=mc_params.device))
+        
+        # Применяем маску к mc_params и ev_starts
+        mc_params_filtered = mc_params[mask]
+        ev_starts_filtered = ev_starts[:-1][mask]  # Исключаем последний элемент ev_starts, так как он не соответствует событию
+        
+        # Вычисляем новые индексы начала событий
+        ev_starts_new = torch.cat([torch.tensor([0], device=data.device), torch.cumsum(ev_starts[1:][mask] - ev_starts[:-1][mask], dim=0)])
+        
+        # Собираем данные, соответствующие выбранным событиям
+        data_indices = torch.cat([torch.arange(ev_starts[i], ev_starts[i+1], device=data.device) for i in torch.where(mask)[0]])
+        data_new = data[data_indices]
+        
+        if get_mc_params:
+            return data_new, ev_starts_new, mc_params_filtered
+        else:
+            return data_new, ev_starts_new
+    def cut_ev_start(self, name: List[str], ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
+        mass = self.str2mass(name)
+        data = torch.tensor([], dtype=torch.long)  # Используем CPU
+        for i, m in enumerate(mass):
+            where_ = torch.where(mc_params[:, par_num] == m)[0]
+            where = torch.cat((where, where_))
+            del where_  # Освобождаем память
+            torch.cuda.empty_cache()  # Очищаем кэш CUDA
+        ev_starts = ev_starts[where]
+        mc_params = mc_params[where]
+        if get_mc_params:
+            return ev_starts, mc_params
+        else:
+            return ev_starts
     
 def get_params_mask(config):
     """

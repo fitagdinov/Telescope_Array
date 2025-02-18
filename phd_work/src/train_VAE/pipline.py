@@ -1,4 +1,5 @@
 from tqdm import tqdm
+import argparse
 import h5py as h5
 import numpy as np
 import os
@@ -35,17 +36,22 @@ class Pipline():
     def __init__(self, config):
         config = read_config()
         self.config = config
-        self.prepipline(config=config)
+        self.prepipline_dict = self.prepipline(config)
+        self.pretrain()
     def prepipline(self, config):
         name = config['PATH'].split('/')[-1]
-        writer = SummaryWriter(log_dir=os.path.join('runs', name))
+        writer = SummaryWriter(log_dir=os.path.join(config['exp'], name))
         writer.add_text('hparams',  str(config))
-        dataset = DataSet.VariableLengthDataset(config['data_path'], 'train')
-        val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test')
+        dataset = DataSet.VariableLengthDataset(config['data_path'], 'train', paticles=config['paticles'])
         kwargs = DataSet.get_params_mask(config)
         collate_fn = DataSet.wrapper_mask(DataSet.collate_fn_many_args, **kwargs)
         train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
-        val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
+        # for many particles
+        val_loaders = []
+        for p in config['paticles']:
+            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=[p])
+            val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
+            val_loaders.append(val_loader)
         start_token = kwargs['start_token'].to(device)
         model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], lstm2=config['lstm2'], start_token=start_token).to(device)
         if config['chpt'] != 'None':
@@ -57,18 +63,18 @@ class Pipline():
         self.val_loader = val_loader
         self.model = model
         self.writer = writer
-        return {'train_loader': train_loader, 'val_loader': val_loader, 'model': model, 'optimizer': optimizer, 'writer': writer}
+        return {'train_loader': train_loader, 'val_loaders': val_loaders, 'model': model, 'optimizer': optimizer, 'writer': writer}
     def load_chpt(self, chpt_path: str):
         self.model.load(chpt_path)
     def pretrain(self):
         config = self.config
-        PATH = config['PATH'] + get_time() + get_params_str(config)
+        PATH = config['PATH']+ get_params_str(config)
         self.PATH = PATH
         config['PATH'] = PATH
         print("Saving Path: {}".format(PATH))
-        prepipline_dict = self.prepipline(config)
+        prepipline_dict = self.prepipline_dict
         self.train_loader = prepipline_dict['train_loader']
-        self.val_loader = prepipline_dict['val_loader']
+        self.val_loaders = prepipline_dict['val_loaders']
         self.model = prepipline_dict['model']
         self.optimizer = prepipline_dict['optimizer']
         self.writer = prepipline_dict['writer']
@@ -86,7 +92,6 @@ class Pipline():
         os.makedirs(PATH, exist_ok = True)
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', factor=0.2, patience=5, threshold=0.005,)
     def train(self):
-        self.pretrain()
         self.loss_best = 1000
         iters = 0
         for epoch in range(self.epochs):
@@ -112,31 +117,61 @@ class Pipline():
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
                 iters += 1
             
-            self.validation(epoch=epoch)
-    def validation(self, epoch: int) -> None:
+            self.validation(epoch=epoch, analys=True)
+    def validation(self, epoch: Optional[int] = None, analys:bool=False) -> None:
         """
         Performs validation on the model using the validation dataset.
 
         Parameters:
         epoch (int): The current epoch number.
+        analys (bool): A flag indicating whether to perform analysis during validation.
 
         Returns:
         None. The function updates the model's state_dict if the validation loss is the best so far.
         It also prints the validation loss and loss_best, updates the learning rate scheduler,
         and writes the validation metrics to TensorBoard.
         """
+        epoch = epoch if epoch is not None else -1
         model = self.model
-        val_loader = self.val_loader
+        val_loaders = self.val_loaders
         epochs = self.epochs
         koef_KL = self.koef_KL
         koef_DL = self.koef_DL
 
         model.eval()
+        loss_mean = np.array([])
+        KL_loss_mean = np.array([])
+        recon_loss_mean = np.array([])
+        num_det_loss_mean = np.array([])
+        for i, val_loader in enumerate(val_loaders):
+            particle = self.config['paticles'][i]
+            loss, KL, recon, num_det = self.validation_step(epoch=epoch, val_loader=val_loader, model=model, koef_KL=koef_KL, koef_DL=koef_DL,particle=particle)
+            loss_mean = np.concatenate((loss_mean, loss))
+            KL_loss_mean = np.concatenate((KL_loss_mean, KL))
+            recon_loss_mean = np.concatenate((recon_loss_mean, recon))
+            num_det_loss_mean = np.concatenate((num_det_loss_mean, num_det))
+            loss_final = loss_mean.mean()
+        # write in TB
+        self.writer.add_scalar("val/Loss/all", loss_final, epoch)
+        # self.writer.add_scalar("val/KL_loss/all", KL_loss_mean.mean(), epoch)
+        self.writer.add_scalar("val/recon_loss/all", recon_loss_mean.mean(), epoch)
+        self.writer.add_scalar("val/num_det_loss/all", num_det_loss_mean.mean(), epoch)
+        if analys:
+            if epoch>0:
+                self.scheduler.step(loss_final)
+            if loss_final<self.loss_best:
+                self.loss_best = loss_final
+                torch.save(model.state_dict(), os.path.join(self.PATH, f'best'))
+
+            print(f'Epoch {epoch + 1}, Loss: {loss_final} loss_best {self.loss_best}')
+
+    def validation_step(self, epoch, val_loader, model, koef_KL=1, koef_DL=1, particle = None):
+        particle = '' if particle is None else particle
         loss_mean = []
         KL_loss_mean = []
         recon_loss_mean = []
         num_det_loss_mean = []
-        pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1}/{epochs}, Loss: 0.0")
+        pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1} in {particle}, Loss: 0.0")
         for x in pbar_val:  # x should be a batch of sequences with padding
             x = x.to(device)
             recon_x, mu, log_var, pred_num = model(x)
@@ -148,20 +183,14 @@ class Pipline():
             KL_loss_mean.append(kl_divergence.item())
             recon_loss_mean.append(recon_loss.item())
             num_det_loss_mean.append(num_det_loss.item())
-            pbar_val.set_description(f"VAL Epoch {epoch + 1}/{epochs}, Loss: {loss.item():.4f}")
+            pbar_val.set_description(f"VAL Epoch {epoch + 1} in {particle}, Loss: {loss.item():.4f}")
 
         loss_final = np.array(loss_mean).mean()
-        if loss_final<self.loss_best:
-            self.loss_best = loss_final
-            torch.save(model.state_dict(), os.path.join(self.PATH, f'best'))
-        print(f'Epoch {epoch + 1}, Loss: {loss_final} loss_best {self.loss_best}')
-        if epoch>0:
-            self.scheduler.step(loss_final)
         # write in TB
-        self.writer.add_scalar("val/Loss", loss_final, epoch)
-        self.writer.add_scalar("val/KL_loss", np.array(KL_loss_mean).mean(), epoch)
-        self.writer.add_scalar("val/recon_loss", np.array(recon_loss_mean).mean(), epoch)
-        self.writer.add_scalar("val/num_det_loss", np.array(num_det_loss_mean).mean(), epoch)
+        self.writer.add_scalar(f"val/Loss/{particle}", loss_final, epoch)
+        # self.writer.add_scalar(f"val/KL_loss/{particle}", np.array(KL_loss_mean).mean(), epoch)
+        self.writer.add_scalar(f"val/recon_loss/{particle}", np.array(recon_loss_mean).mean(), epoch)
+        self.writer.add_scalar(f"val/num_det_loss/{particle}", np.array(num_det_loss_mean).mean(), epoch)
 
         #show from last batch
         real = x[self.show_index]
@@ -171,7 +200,9 @@ class Pipline():
             # get from back side
             i = -ii
             fig = show_pred(real[i], fake[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = num[i])
-            self.writer.add_figure(f"val/show_pred_{ii}", fig, epoch)
+            self.writer.add_figure(f"val/show_pred_{ii}/{particle}", fig, epoch)
+        return np.array(loss_mean), np.array(KL_loss_mean), np.array(recon_loss_mean), np.array(num_det_loss_mean)
+
     def predict_latent(self):
         # TODO сделать в отдельной функции getl loader
         config = self.config
@@ -204,6 +235,17 @@ class Pipline():
         return latent_list, params
 
 if __name__ == "__main__":
+    # Create the parser
+    parser = argparse.ArgumentParser(description="A simple example of argparse")
+
+    # Add optional arguments
+    parser.add_argument("-m", "--mode", type=str, help="The output file to save results", default="train")
+    # Parse the arguments
+    args = parser.parse_args()
+
     config = 'config.yaml'
     pipline = Pipline(config)
-    pipline.train()
+    if args.mode == 'train':
+        pipline.train()
+    elif args.mode == 'test':
+        pipline.validation()
