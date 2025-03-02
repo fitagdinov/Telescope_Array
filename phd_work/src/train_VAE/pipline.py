@@ -11,7 +11,6 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-print(torch.__version__)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Using device:', device)
 import model as Model
@@ -33,19 +32,23 @@ tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
 
 logger = logging.getLogger()
 class Pipline():
-    def __init__(self, config):
+    def __init__(self, config, need_train_DS: bool = True):
         config = read_config()
         self.config = config
-        self.prepipline_dict = self.prepipline(config)
+        self.prepipline_dict = self.prepipline(config, need_train_DS=need_train_DS)
         self.pretrain()
-    def prepipline(self, config):
+    def prepipline(self, config, need_train_DS: bool = True):
         name = config['PATH'].split('/')[-1]
         writer = SummaryWriter(log_dir=os.path.join(config['exp'], name))
         writer.add_text('hparams',  str(config))
-        dataset = DataSet.VariableLengthDataset(config['data_path'], 'train', paticles=config['paticles'])
         kwargs = DataSet.get_params_mask(config)
         collate_fn = DataSet.wrapper_mask(DataSet.collate_fn_many_args, **kwargs)
-        train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
+        if need_train_DS:
+            dataset = DataSet.VariableLengthDataset(config['data_path'], 'train', paticles=config['paticles'])
+            train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
+        else:
+            dataset = None
+            train_loader = None
         # for many particles
         val_loaders = []
         for p in config['paticles']:
@@ -60,7 +63,6 @@ class Pipline():
         # write augmentes
         self.optimizer = optimizer
         self.train_loader = train_loader
-        self.val_loader = val_loader
         self.model = model
         self.writer = writer
         return {'train_loader': train_loader, 'val_loaders': val_loaders, 'model': model, 'optimizer': optimizer, 'writer': writer}
@@ -203,36 +205,76 @@ class Pipline():
             self.writer.add_figure(f"val/show_pred_{ii}/{particle}", fig, epoch)
         return np.array(loss_mean), np.array(KL_loss_mean), np.array(recon_loss_mean), np.array(num_det_loss_mean)
 
-    def predict_latent(self):
+    def predict_latent(self, write_embedding: bool = True, choise_num:Optional[int] = None):
         # TODO сделать в отдельной функции getl loader
         config = self.config
-        writer = SummaryWriter(log_dir=os.path.join('runs', 'tests'))
-        test_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', mc_params=True)
-        kwargs = DataSet.get_params_mask(config)
-        collate_fn = DataSet.wrapper_mask(DataSet.collate_fn_many_args, mc_params = True, **kwargs)
-        test_loader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
+        writer = SummaryWriter(log_dir=os.path.join('runs_tests', 'tests'))
         model = self.model
         model.eval()
         latent_list = []
         params = []
-        
+        particles = []
+        all_loss = None
+        test_loaders = self.val_loaders
+        dict_info = {}
         with torch.no_grad():
-            for x,par in tqdm(test_loader):
-                x = x.to(device)
-                mu, log_var, (h_n, c_n) = model.encoder(x)
-                latent_list.append(mu.cpu())
-                params.append(par.cpu())
+            for i, test_loader in enumerate(test_loaders):
+                for x in tqdm(test_loader):
+                    x = x.to(device)
+                    mu, log_var, (h_n, c_n) = model.encoder(x)
+                    recon_x, mu, log_var, pred_num = model(x)
+                    recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=self.mask, use_mask = self.config['use_mask'], koef_loss=self.koef_loss )
+                    print(recon_loss)
+                    if all_loss is None:
+                        all_loss = recon_loss.cpu().detach() 
+                    else:
+                        print(all_loss.shape)
+                        all_loss = torch.cat((all_loss, recon_loss.cpu().detach()))
+                    latent_list.append(mu.cpu())
+                    # params.append(par.cpu())
+                    particles += [self.config['paticles'][i]] * mu.shape[0] # for equal lenght with latent
+
+                    #write in dict
+                    # TODO otimize
+                    try:
+                        dict_info[self.config['paticles'][i]] = torch.cat((dict_info[self.config['paticles'][i]], mu.cpu().detach() ), dim=0)
+                    except KeyError:
+                        dict_info[self.config['paticles'][i]] = mu.cpu().detach() 
         latent_list = torch.cat(latent_list, dim=0)
-        params = torch.cat(params, dim=0)
-        print(params.shape)
+        # params = torch.cat(params, dim=0)
+        # print(params.shape)
+        if choise_num:
+            latent_list, particles, all_loss = self.select_random_ordered(latent_list, particles, all_loss, int(choise_num))
+        print(latent_list. shape, len(particles))
         try:
-            writer.add_embedding(latent_list,
-                        metadata=params[:,1],
-                        )
+            if write_embedding:
+                writer.add_embedding(latent_list,
+                            metadata=particles,
+                            )
         except Exception as e:
             # logger.log_exception(e)
             print(e)
-        return latent_list, params
+        for p,lat in dict_info.items():
+            print(f"particles:{p} mean{lat.mean()} std {lat.std()}")
+            # for i in range(lat.shape[1]):
+            #     print(f"in {i} comonent mean{lat[:,i].mean()} std {lat[:,i].std()}")
+        return latent_list, particles, all_loss#params
+    def select_random_ordered(self, latent_list, particles, all_loss, m):
+        n = len(particles)
+        assert n == latent_list.shape[0], "Размеры данных не совпадают"
+        assert m <= n, "m не может превышать n"
+
+        # Генерация случайных индексов без повторений
+        indices = np.random.choice(n, size=m, replace=False)
+        
+        # Сортировка индексов для сохранения порядка
+        sorted_indices = np.sort(indices)
+        
+        # Выборка данных
+        selected_latent = latent_list[sorted_indices]
+        selected_particles = [particles[i] for i in sorted_indices]
+        all_loss = all_loss[sorted_indices]
+        return selected_latent, selected_particles, all_loss
 
 if __name__ == "__main__":
     # Create the parser
@@ -240,12 +282,20 @@ if __name__ == "__main__":
 
     # Add optional arguments
     parser.add_argument("-m", "--mode", type=str, help="The output file to save results", default="train")
+    parser.add_argument("-e", "--write_embading", type=bool, help="Write latent data in TB for project analys", default="True")
     # Parse the arguments
     args = parser.parse_args()
 
     config = 'config.yaml'
-    pipline = Pipline(config)
     if args.mode == 'train':
+        pipline = Pipline(config)
+        print('TRAIN PIPLINE')
         pipline.train()
     elif args.mode == 'test':
+        pipline = Pipline(config, need_train_DS=False)
+        print('TEST PIPLINE')
         pipline.validation()
+    elif args.mode == 'latent':
+        pipline = Pipline(config, need_train_DS=False)
+        print('Latent PIPLINE')
+        pipline.predict_latent(args.write_embading)

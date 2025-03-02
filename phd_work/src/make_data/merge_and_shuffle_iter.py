@@ -6,19 +6,20 @@ import os
 import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='myapp.log', level=logging.INFO)
-MC_dir_path = '/home/rfit/Telescope_Array/phd_work/data/filtered/'
+MC_dir_path = '/home3/rfit/Telescope_Array/phd_work/data/filtered/'
 
-ps = ['pr','fe']
+ps = ['pr','photon']
 ms = ['q4']
 es = ['e1']
 h5s = [ p+'_'+m+'_14yr_'+e+'_0110_excl_sat_F_excl_geo_F.h5' for p in ps for m in ms for e in es ]
 models_ids = np.array([ m for p in ps for m in ms for e in es ]).astype('<S6')
+h5s = ['photon_14yr_0001_excl_sat_F_excl_geo_F.h5', 'pr_q4_14yr_e1_0001_excl_sat_F_excl_geo_F.h5']
 h5s = [ MC_dir_path+p for p in h5s ]
 print(logger, __name__)
 logger.info(os.listdir(MC_dir_path))
 h5dir = '/home3/rfit/Telescope_Array/phd_work/data/merged/'
 os.makedirs(h5dir, exist_ok=True)
-h5_out = '_'.join(ps+ms+es) + '_0110_excl_sat_F_excl_geo_F.h5'
+h5_out = '_'.join(ps) + '_0001_excl_sat_F_excl_geo_F.h5' #+ms+es
 h5_out = os.path.join(h5dir, h5_out)
 write_step = 500000
 print('IN', h5s, "OUT ", h5_out)

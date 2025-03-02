@@ -2,7 +2,7 @@ import numpy as np
 import h5py as h5
 
 use_wf_16 = True
-h5_in = 'pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
+h5_in = 'pr_photon_0001_excl_sat_F_excl_geo_F.h5'
 h5f = '/home3/rfit/Telescope_Array/phd_work/data/bundled/' + h5_in
 num_evs = 200000
 keys_evs = ['recos','det_max_wf','det_max_params']

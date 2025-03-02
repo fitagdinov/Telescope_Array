@@ -18,7 +18,7 @@ class VariableLengthDataset(Dataset):
                      'fe': 5626}
         self.paticles = paticles
         print('mc_params',mc_params)
-        data, ev_starts, mc_params = self.read_h5(data_path, mode, mc_params)
+        data, ev_starts, mc_params = self.read_h5(data_path, mode, mc_params, paticles)
         # prepoccessing
         # data = self.preprocc_signal(data, 3)
         self.data = data
@@ -37,7 +37,7 @@ class VariableLengthDataset(Dataset):
             return torch.tensor(self.data[st:fn]), torch.tensor(mc_params)
         else:
             return torch.tensor(self.data[st:fn])
-    def read_h5(self, data_path, mode, mc_params):
+    def read_h5(self, data_path, mode, mc_params, paticles: Optional[List[str]] = None):
         with h5.File(data_path,'r') as f:
             print('keys', list(f.keys()))
             train = f[mode]
@@ -45,13 +45,13 @@ class VariableLengthDataset(Dataset):
             ev_starts = torch.tensor(train['ev_starts'][()])
             if mc_params:
                 mc_params = torch.tensor(train['mc_params'][()])
-                if self.paticles is not None:
-                    dt_params, ev_starts, mc_params = self.choise_def_particles(self.paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=True)
+                if paticles is not None:
+                    dt_params, ev_starts, mc_params = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=True)
             else:
                 mc_params = torch.tensor(train['mc_params'][()])
-                print('self.paticles', self.paticles)
-                if self.paticles is not None:
-                    dt_params, ev_starts = self.choise_def_particles(self.paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=False)
+                print('self.paticles', paticles)
+                if paticles is not None:
+                    dt_params, ev_starts = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=False)
             mc_params = None
         return dt_params, ev_starts, mc_params
     def str2mass(self, name: List[str]) -> List[int]:
@@ -98,9 +98,11 @@ class VariableLengthDataset(Dataset):
         ev_starts_new = torch.cat([torch.tensor([0], device=data.device), torch.cumsum(ev_starts[1:][mask] - ev_starts[:-1][mask], dim=0)])
         
         # Собираем данные, соответствующие выбранным событиям
-        data_indices = torch.cat([torch.arange(ev_starts[i], ev_starts[i+1], device=data.device) for i in torch.where(mask)[0]])
-        data_new = data[data_indices]
-        
+        try:
+            data_indices = torch.cat([torch.arange(ev_starts[i], ev_starts[i+1], device=data.device) for i in torch.where(mask)[0]])
+            data_new = data[data_indices]
+        except NotImplementedError:
+            raise NotImplementedError(f"Probably this particle was not find in this file. Total ev_starts is {len(ev_starts)}")
         if get_mc_params:
             return data_new, ev_starts_new, mc_params_filtered
         else:

@@ -1,8 +1,8 @@
 import numpy as np
 import h5py as h5
 import os
-h5_in = '/home3/rfit/Telescope_Array/phd_work/data/bundled/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
-h5_out = '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
+h5_in = '/home3/rfit/Telescope_Array/phd_work/data/bundled/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
+h5_out = '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
 os.makedirs('/home3/rfit/Telescope_Array/phd_work/data/normed/', exist_ok=True)
 print(os.path.exists(h5_in))
 iter_step = 250000
