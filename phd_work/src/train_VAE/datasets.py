@@ -32,11 +32,12 @@ class VariableLengthDataset(Dataset):
     def __getitem__(self, idx):
         st = self.ev_starts[idx]
         fn = self.ev_starts[idx + 1]
+        
+        mc_params = self.mc_params[idx]
         if self.mc_params is not None:
-            mc_params = self.mc_params[idx]
-            return torch.tensor(self.data[st:fn]), torch.tensor(mc_params)
+            return torch.tensor(self.data[st:fn]), torch.tensor(mc_params[1]), torch.tensor(mc_params)
         else:
-            return torch.tensor(self.data[st:fn])
+            return torch.tensor(self.data[st:fn]), torch.tensor(mc_params[1])
     def read_h5(self, data_path, mode, mc_params, paticles: Optional[List[str]] = None):
         with h5.File(data_path,'r') as f:
             print('keys', list(f.keys()))
@@ -52,7 +53,7 @@ class VariableLengthDataset(Dataset):
                 print('self.paticles', paticles)
                 if paticles is not None:
                     dt_params, ev_starts = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=False)
-            mc_params = None
+            # mc_params = None
         return dt_params, ev_starts, mc_params
     def str2mass(self, name: List[str]) -> List[int]:
         #1. mc_parttype (CORSIKA, 1 - gamma, 14 - proton, 5626 - Fe)
@@ -173,15 +174,18 @@ def collate_fn_many_args(batch: Tensor, start_token: Tensor, stop_token: Tensor,
     if mc_params:
         sequences = []
         params = None
-        for item, par in batch:
+        particles = None
+        for item, part, par  in batch:
             sequences.append(torch.cat((start_token, item, stop_token), dim=0))
             if params is None:
                 params = par.unsqueeze(0)
+                particles = part.unsqueeze(0)
             else:
                 params = np.concatenate((params, par.unsqueeze(0)), axis=0)
+                particles = np.concatenate((particles, part.unsqueeze(0)), axis=0) 
         # Заполняем последовательности до одинаковой длины
         padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=padding_value)  # (batch_size, max_seq_len, 5)
-        return padded_sequences, torch.tensor(params)
+        return padded_sequences, torch.tensor(particles), torch.tensor(params)
     else: 
         sequences = [torch.cat((start_token, item, stop_token), dim=0) for item in batch]
         # Заполняем последовательности до одинаковой длины

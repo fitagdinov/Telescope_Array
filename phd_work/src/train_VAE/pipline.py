@@ -42,9 +42,10 @@ class Pipline():
         writer = SummaryWriter(log_dir=os.path.join(config['exp'], name))
         writer.add_text('hparams',  str(config))
         kwargs = DataSet.get_params_mask(config)
+        kwargs['mc_params'] = True
         collate_fn = DataSet.wrapper_mask(DataSet.collate_fn_many_args, **kwargs)
         if need_train_DS:
-            dataset = DataSet.VariableLengthDataset(config['data_path'], 'train', paticles=config['paticles'])
+            dataset = DataSet.VariableLengthDataset(config['data_path'], 'train', paticles=config['paticles'], mc_params=True)
             train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
         else:
             dataset = None
@@ -52,7 +53,7 @@ class Pipline():
         # for many particles
         val_loaders = []
         for p in config['paticles']:
-            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=[p])
+            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=[p], mc_params=True)
             val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
             val_loaders.append(val_loader)
         start_token = kwargs['start_token'].to(device)
@@ -85,11 +86,13 @@ class Pipline():
         self.show_index = config['show_index']
         self.koef_KL = config['koef_KL']
         self.koef_DL = config['koef_DL']
+        self.koef_mass = config['koef_mass']
 
         self.use_mask = config['use_mask']
         self.stop_token = config['stop_token']
         self.start_token = config['start_token']
         koef_loss = torch.tensor(config['koef_loss']).unsqueeze(0).to('cpu')
+        self.paticles = self.config['paticles']
         self.koef_loss = koef_loss.to(device)
         os.makedirs(PATH, exist_ok = True)
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', factor=0.2, patience=5, threshold=0.005,)
@@ -101,19 +104,23 @@ class Pipline():
             self.writer.add_scalar("lr_scheduler", self.optimizer.param_groups[0]['lr'], epoch)
             self.model.train()
             pbar = tqdm(self.train_loader, desc =f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: 0.0")
-            for x in pbar:  # x должен быть пакетом последовательностей с заполнением
+            for x, part, _ in pbar:  # x должен быть пакетом последовательностей с заполнением
                 x = x.to(device)
+                part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                 self.optimizer.zero_grad()
-                recon_x, mu, log_var, pred_num = self.model(x)
-                recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=self.mask,
-                                                                        use_mask=self.use_mask, koef_loss=self.koef_loss)
+                recon_x, mu, log_var, pred_num, pred_mass = self.model(x)
+                recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
+                                                                                    mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss
+                                                                                    )
                 num_det_loss *= self.koef_DL
                 kl_divergence *= self.koef_KL
-                loss = recon_loss + kl_divergence + num_det_loss
+                mass_loss *= self.koef_mass
+                loss = recon_loss + kl_divergence + num_det_loss + mass_loss
                 self.writer.add_scalar("train/Loss", loss, iters)
                 self.writer.add_scalar("train/KL_loss", kl_divergence, iters)
                 self.writer.add_scalar("train/recon_loss", recon_loss, iters)
                 self.writer.add_scalar("train/num_det_loss", num_det_loss, iters)
+                self.writer.add_scalar("train/mass_loss", mass_loss, iters)
                 loss.backward()
                 self.optimizer.step()
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
@@ -173,11 +180,18 @@ class Pipline():
         KL_loss_mean = []
         recon_loss_mean = []
         num_det_loss_mean = []
+
+        pred_mass_array = None
+        real_mass_array = None
         pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1} in {particle}, Loss: 0.0")
-        for x in pbar_val:  # x should be a batch of sequences with padding
+        for x, part, _ in pbar_val:  # x should be a batch of sequences with padding
             x = x.to(device)
-            recon_x, mu, log_var, pred_num = model(x)
-            recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=self.mask, use_mask = self.config['use_mask'], koef_loss=self.koef_loss )
+            part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
+            recon_x, mu, log_var, pred_num, pred_mass = model(x)
+            recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
+                                                                                    mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss
+                                                                                    )
+            mass_loss *= self.koef_mass
             kl_divergence *= koef_KL
             num_det_loss *= koef_DL
             loss = recon_loss + kl_divergence + num_det_loss

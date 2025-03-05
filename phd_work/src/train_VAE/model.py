@@ -4,12 +4,6 @@ from torch import Tensor
 # from logging import logging
 # loger = logging.getLogger(__name__)
 
-class Embading(nn.Module):
-    def __init__(self):
-        super(Embading, self).__init__()
-
-
-
 class Encoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim, lstm2: bool = False, lstm3: bool = False):
         super(Encoder, self).__init__()
@@ -43,7 +37,7 @@ class DecoderRNN(nn.Module):
     '''
     get from https://pytorch.org/tutorials/intermediate/seq2seq_translation_tutorial.html
     '''
-    def __init__(self, latent_dim, hidden_size, output_size, start_token: Tensor, lstm2: bool = False, lstm3: bool = False):
+    def __init__(self, latent_dim, hidden_size, output_size, start_token: Tensor, lstm2: bool = False, lstm3: bool = False, num_part: int = 2):
         super(DecoderRNN, self).__init__()
         self.lat2hid = nn.Linear(latent_dim, hidden_size)
         self.lat2hid2 = nn.Linear(latent_dim, hidden_size)
@@ -58,6 +52,15 @@ class DecoderRNN(nn.Module):
         self.fc_seq2 = nn.Linear(hidden_size, 1)
         self.relu = nn.ReLU()
 
+        # mass spectrum
+        self.num_part = num_part
+        # if num_part is not None:
+        self.fc_mass = nn.Linear(latent_dim, hidden_size)
+        self.fc_mass2 = nn.Linear(hidden_size, hidden_size)
+        self.fc_mass3 = nn.Linear(hidden_size, num_part)
+        self.sofrmax = nn.Softmax()
+
+        
         self.lstm2 = None
         self.lstm3 = None
         if lstm2:
@@ -91,7 +94,15 @@ class DecoderRNN(nn.Module):
         num = self.lrealu(num)
         num = self.fc_seq2(num)
         num = self.relu(num)
-        return decoder_outputs, decoder_hidden, num
+
+        # predict mass spectrum
+        mass = self.fc_mass(encoder_outputs)
+        mass = self.lrealu(mass)
+        mass = self.fc_mass2(mass)
+        mass = self.lrealu(mass)
+        mass = self.fc_mass3(mass)
+        mass = self.sofrmax(mass)
+        return decoder_outputs, decoder_hidden, num, mass
     def seq_LSTMs(self, x, hidden = None):
         h, c_n = self.lstm1(x, hidden) 
         if self.lstm2 is not None:
@@ -109,11 +120,11 @@ class DecoderRNN(nn.Module):
         return output, hidden
 
 class VAE(nn.Module):
-    def __init__(self, input_dim=5, hidden_dim=32, latent_dim=1, start_token: Tensor = torch.zeros(1,6), lstm2: bool = False, lstm3: bool = False) -> None:
+    def __init__(self, input_dim=5, hidden_dim=32, latent_dim=1, start_token: Tensor = torch.zeros(1,6), lstm2: bool = False, lstm3: bool = False, num_part: int = 2) -> None:
         super(VAE, self).__init__()
         self.encoder = Encoder(input_dim, hidden_dim, latent_dim, lstm2=lstm2, lstm3=lstm3 )
         # self.decoder = Decoder(latent_dim, hidden_dim, input_dim, hidden_dim_latent)
-        self.decoder = DecoderRNN(latent_dim, hidden_dim, input_dim, start_token, lstm2=lstm2, lstm3=lstm3 )
+        self.decoder = DecoderRNN(latent_dim, hidden_dim, input_dim, start_token, lstm2=lstm2, lstm3=lstm3, num_part=num_part)
         print("Encoder has params:", self.count_parameters(self.encoder),"Decoder has params:", self.count_parameters(self.decoder))
     def reparameterize(self, mu, log_var, koef=1):
         std = torch.exp(0.5 * log_var)
@@ -124,8 +135,8 @@ class VAE(nn.Module):
         mu, log_var, (h_n, c_n) = self.encoder(x)
         z = self.reparameterize(mu, log_var, koef=1.0)
         #change second param
-        recon_x, _, num = self.decoder(z, mu, seq_len)
-        return recon_x, mu, log_var, num
+        recon_x, _, num, mass = self.decoder(z, mu, seq_len)
+        return recon_x, mu, log_var, num, mass
     @staticmethod
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)

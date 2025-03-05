@@ -27,7 +27,7 @@ def CE_loss_particle(pred : torch.Tensor, real : torch.Tensor):
     # assert pred.shape = real.shape
     loss = nn.CrossEntropyLoss(reduction='none')(pred, real)
     return torch.mean(loss)
-def vae_loss(recon_x, x, mu, log_var, pred_num, mask = -10.0, use_mask: bool = True, koef_loss: Optional[torch.Tensor] = None):
+def vae_loss(recon_x, x, mu, log_var, pred_num, pred_part, real_part, mask = -10.0, use_mask: bool = True, koef_loss: Optional[torch.Tensor] = None):
     if koef_loss is None:
         koef_loss = torch.ones(1,6)
     koef_loss = koef_loss.unsqueeze(0)
@@ -45,7 +45,10 @@ def vae_loss(recon_x, x, mu, log_var, pred_num, mask = -10.0, use_mask: bool = T
         recon_loss = torch.mean(recon_loss) # mean by batch and featches
         # loss for predict num active detections
         num_det_loss = Num_Det_Loss(num_det[:,:,0].float(), pred_num)
-        return recon_loss, kl_divergence / x.size(0), num_det_loss
+
+        # loss for predict particles
+        loss_mass = CE_loss_particle(pred_part, real_part)
+        return recon_loss, kl_divergence / x.size(0), num_det_loss, loss_mass
     else:
         recon_loss = torch.mean(recon_loss) # mean by active det
-        return recon_loss, kl_divergence / x.size(0), num_det_loss
+        return recon_loss, kl_divergence / x.size(0), num_det_loss, loss_mass

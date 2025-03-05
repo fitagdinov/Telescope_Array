@@ -15,6 +15,7 @@ stop_token: -10.0
 start_token: hard_v1
 koef_KL: 0.0
 koef_DL: 0.1
+koef_mass: 0.1
 paticles:
   - pr
   # - fe
@@ -23,7 +24,7 @@ paticles:
 koef_loss: [1,1,0,1,1,1]
 exp: test_particles
 use_mask: True
-PATH: 'test_particles/latent'
+PATH: 'test_particles/predict_part'
 show_index:
   - 10
   - 20
@@ -32,5 +33,5 @@ write_param:
   - 'latent_dim'
   # - 'hidden_dim'
   - 'paticles'
-# chpt: None
-chpt: /home/rfit/Telescope_Array/phd_work/src/train_VAE/test_particles/Pr_latent_64latent_dim=64;_paticles=['pr'];_/best
+chpt: None
+# chpt: /home/rfit/Telescope_Array/phd_work/src/train_VAE/test_particles/Pr_latent_64latent_dim=64;_paticles=['pr'];_/best
