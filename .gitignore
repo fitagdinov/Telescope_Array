@@ -28,3 +28,6 @@ phd_work/images/
 phd_work/src/train_VAE/runs2/
 phd_work/src/train_VAE/runs_tests/
 phd_work/src/train_VAE/runs_test/
+phd_work/src/particle_classification/test_particles/
+phd_work/TBruns
+phd_work/Models

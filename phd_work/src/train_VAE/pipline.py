@@ -32,30 +32,35 @@ tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
 
 logger = logging.getLogger()
 class Pipline():
-    def __init__(self, config, need_train_DS: bool = True):
-        config = read_config()
+    def __init__(self, config, need_train_DS: bool = True, many_val_loaders: bool = True):
+        config = read_config(config)
         self.config = config
-        self.prepipline_dict = self.prepipline(config, need_train_DS=need_train_DS)
+        self.prepipline_dict = self.prepipline(config, need_train_DS=need_train_DS, many_val_loaders= many_val_loaders)
         self.pretrain()
-    def prepipline(self, config, need_train_DS: bool = True):
+    def prepipline(self, config, need_train_DS: bool = True, many_val_loaders: bool = True):
         name = config['PATH'].split('/')[-1]
-        writer = SummaryWriter(log_dir=os.path.join(config['exp'], name))
+        writer = SummaryWriter(log_dir=os.path.join('/home/rfit/Telescope_Array/phd_work/TBruns/', config['exp'], name))
         writer.add_text('hparams',  str(config))
         kwargs = DataSet.get_params_mask(config)
         kwargs['mc_params'] = True
         collate_fn = DataSet.wrapper_mask(DataSet.collate_fn_many_args, **kwargs)
         if need_train_DS:
-            dataset = DataSet.VariableLengthDataset(config['data_path'], 'train', paticles=config['paticles'], mc_params=True)
+            dataset = DataSet.VariableLengthDataset(config['data_path'], 'train', paticles=config['paticles']['train'], mc_params=True)
             train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
         else:
             dataset = None
             train_loader = None
         # for many particles
-        val_loaders = []
-        for p in config['paticles']:
-            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=[p], mc_params=True)
+        if many_val_loaders:
+            val_loaders = []
+            for p in config['paticles']['test']:
+                val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=[p], mc_params=True)
+                val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
+                val_loaders.append(val_loader)
+        else:
+            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=config['paticles'], mc_params=True)
             val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
-            val_loaders.append(val_loader)
+            val_loaders = [val_loader]        
         start_token = kwargs['start_token'].to(device)
         model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], lstm2=config['lstm2'], start_token=start_token).to(device)
         if config['chpt'] != 'None':
@@ -71,7 +76,7 @@ class Pipline():
         self.model.load(chpt_path)
     def pretrain(self):
         config = self.config
-        PATH = config['PATH']+ get_params_str(config)
+        PATH = os.path.join(config['save_model_path'], config['PATH'])
         self.PATH = PATH
         config['PATH'] = PATH
         print("Saving Path: {}".format(PATH))
@@ -153,7 +158,7 @@ class Pipline():
         recon_loss_mean = np.array([])
         num_det_loss_mean = np.array([])
         for i, val_loader in enumerate(val_loaders):
-            particle = self.config['paticles'][i]
+            particle = self.config['paticles']['test'][i]
             loss, KL, recon, num_det = self.validation_step(epoch=epoch, val_loader=val_loader, model=model, koef_KL=koef_KL, koef_DL=koef_DL,particle=particle)
             loss_mean = np.concatenate((loss_mean, loss))
             KL_loss_mean = np.concatenate((KL_loss_mean, KL))

@@ -44,6 +44,7 @@ def read_config(config: str = 'config.yaml') -> dict:
     Returns:
     dict: A dictionary containing the configuration parameters.
     """
+    print(os.listdir())
     with open(config, 'r') as file:
         hparams = yaml.safe_load(file)
     return hparams

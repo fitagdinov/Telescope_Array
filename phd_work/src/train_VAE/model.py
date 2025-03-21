@@ -134,8 +134,9 @@ class VAE(nn.Module):
         seq_len = x.size(1)
         mu, log_var, (h_n, c_n) = self.encoder(x)
         z = self.reparameterize(mu, log_var, koef=1.0)
-        #change second param
-        recon_x, _, num, mass = self.decoder(z, mu, seq_len)
+        
+        # change 05.03.2025. Was self.decoder(z, mu, seq_len)
+        recon_x, _, num, mass = self.decoder(mu, mu, seq_len)
         return recon_x, mu, log_var, num, mass
     @staticmethod
     def count_parameters(model):

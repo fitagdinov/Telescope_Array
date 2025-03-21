@@ -1,13 +1,14 @@
 mode: Latent
 input_dim: 6
 hidden_dim: 512
-latent_dim: 4
+latent_dim: 64
 batch_size: 2000
 lr: 1e-3
 epoches: 100
 lstm2: False
 #data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
+# data_path: '/home3/ivkhar/TA/data/MC/normed/gamma_search/pr_ga_all_0001_eq_eff_normed.h5'
 data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
 #for masking in dataloader
 padding_value: -11.0
@@ -15,19 +16,17 @@ stop_token: -10.0
 start_token: hard_v1
 koef_KL: 0.0
 koef_DL: 0.1
-koef_mass: 0.0
+koef_mass: 0.1
 paticles:
-  train:
-    - pr
-  test:
-    - pr
-    - photon
+  - pr
+  # - fe
+  - photon
 
 koef_loss: [1,1,0,1,1,1]
-exp: AutoEncoder
+exp: test_particles
 use_mask: True
-PATH: 'Proton_train_lat=4'
-save_model_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder
+PATH: 'TransformerClassificationModel_V2'
+save_model_path: /home/rfit/Telescope_Array/phd_work/Models/Classification
 show_index:
   - 10
   - 20
