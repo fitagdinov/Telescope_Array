@@ -18,9 +18,12 @@ koef_KL: 0.0
 koef_DL: 0.1
 koef_mass: 0.1
 paticles:
-  - pr
-  # - fe
-  - photon
+  train:
+    - pr
+    - photon
+  test:
+    - pr
+    - photon
 
 koef_loss: [1,1,0,1,1,1]
 exp: test_particles

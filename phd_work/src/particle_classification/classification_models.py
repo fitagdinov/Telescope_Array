@@ -92,6 +92,9 @@ class TransformerClassificationModel(nn.Module):
         z = self.fc2(z)
         # x = self.softmax(x)
         return x
+    def load(self, path):
+        if path is not None:
+            self.load_state_dict(torch.load(path))
 if __name__ == '__main__':
     model = Simple_classifiacation_model(encoder_path="/home/rfit/Telescope_Array/phd_work/src/train_VAE/test_particles/Pr_Phootn_latent_64latent_dim=64;_paticles=['pr', 'photon'];_/best",
                                                                input_dim=6, hidden_dim=512, latent_dim=64)

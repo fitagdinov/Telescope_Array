@@ -50,7 +50,6 @@ class VariableLengthDataset(Dataset):
                     dt_params, ev_starts, mc_params = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=True)
             else:
                 mc_params = torch.tensor(train['mc_params'][()])
-                print('self.paticles', paticles)
                 if paticles is not None:
                     dt_params, ev_starts = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=False)
             # mc_params = None

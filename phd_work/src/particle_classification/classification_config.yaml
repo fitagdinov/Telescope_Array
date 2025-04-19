@@ -1,7 +1,7 @@
 mode: Latent
 input_dim: 6
 hidden_dim: 512
-latent_dim: 64
+latent_dim: 8
 batch_size: 2000
 lr: 1e-3
 epoches: 100
@@ -17,18 +17,25 @@ koef_KL: 0.0
 koef_DL: 0.1
 koef_mass: 0.1
 paticles:
-  - pr
-  # - fe
-  - photon
+  train:
+    - pr
+    - photon
+  test:
+    - pr
+    - photon
+
 
 koef_loss: [1,1,0,1,1,1]
-exp: test_particles
+exp: lat8
 use_mask: True
 PATH: 'test_particles/predict_part'
 show_index:
   - 10
   - 20
   - 30
+used_model: 'TransformerClassificationModel'
+encoder_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Proton_train_lat=8/best
+save_model_path: /home/rfit/Telescope_Array/phd_work/Models/Classification
 write_param:
   - 'latent_dim'
   # - 'hidden_dim'

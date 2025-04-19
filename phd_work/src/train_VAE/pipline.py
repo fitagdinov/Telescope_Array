@@ -58,7 +58,7 @@ class Pipline():
                 val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
                 val_loaders.append(val_loader)
         else:
-            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=config['paticles'], mc_params=True)
+            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=config['paticles']['test'], mc_params=True)
             val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
             val_loaders = [val_loader]        
         start_token = kwargs['start_token'].to(device)
@@ -238,33 +238,34 @@ class Pipline():
         dict_info = {}
         with torch.no_grad():
             for i, test_loader in enumerate(test_loaders):
-                for x in tqdm(test_loader):
+                for x, part, _ in tqdm(test_loader):
                     x = x.to(device)
+                    part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                     mu, log_var, (h_n, c_n) = model.encoder(x)
-                    recon_x, mu, log_var, pred_num = model(x)
-                    recon_loss, kl_divergence, num_det_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, mask=self.mask, use_mask = self.config['use_mask'], koef_loss=self.koef_loss )
-                    print(recon_loss)
+                    recon_x, mu, log_var, pred_num, pred_mass = model(x)
+                    recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
+                                                                                    mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
+                                                                                    reduce_loss_per_event = True
+                                                                                    )
                     if all_loss is None:
                         all_loss = recon_loss.cpu().detach() 
                     else:
-                        print(all_loss.shape)
                         all_loss = torch.cat((all_loss, recon_loss.cpu().detach()))
                     latent_list.append(mu.cpu())
                     # params.append(par.cpu())
-                    particles += [self.config['paticles'][i]] * mu.shape[0] # for equal lenght with latent
+                    particles += [self.config['paticles']['test'][i]] * mu.shape[0] # for equal lenght with latent
 
                     #write in dict
                     # TODO otimize
                     try:
-                        dict_info[self.config['paticles'][i]] = torch.cat((dict_info[self.config['paticles'][i]], mu.cpu().detach() ), dim=0)
+                        dict_info[self.config['paticles']['test'][i]] = torch.cat((dict_info[self.config['paticles']['test'][i]], mu.cpu().detach() ), dim=0)
                     except KeyError:
-                        dict_info[self.config['paticles'][i]] = mu.cpu().detach() 
+                        dict_info[self.config['paticles']['test'][i]] = mu.cpu().detach() 
         latent_list = torch.cat(latent_list, dim=0)
         # params = torch.cat(params, dim=0)
         # print(params.shape)
         if choise_num:
             latent_list, particles, all_loss = self.select_random_ordered(latent_list, particles, all_loss, int(choise_num))
-        print(latent_list. shape, len(particles))
         try:
             if write_embedding:
                 writer.add_embedding(latent_list,

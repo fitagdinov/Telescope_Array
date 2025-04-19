@@ -1,7 +1,7 @@
 mode: Latent
 input_dim: 6
 hidden_dim: 512
-latent_dim: 4
+latent_dim: 8
 batch_size: 2000
 lr: 1e-3
 epoches: 100
@@ -19,6 +19,7 @@ koef_mass: 0.0
 paticles:
   train:
     - pr
+    - photon
   test:
     - pr
     - photon
@@ -26,7 +27,7 @@ paticles:
 koef_loss: [1,1,0,1,1,1]
 exp: AutoEncoder
 use_mask: True
-PATH: 'Proton_train_lat=4'
+PATH: 'Proton_train_lat=8_Pr+photon'
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder
 show_index:
   - 10

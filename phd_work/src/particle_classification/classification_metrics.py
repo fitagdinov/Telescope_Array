@@ -19,7 +19,7 @@ class ClassificationMetrics():
                             'f1_score': self.f1_score,}
         self.TBwriter = TBwriter
         self.score = None
-    def __call__(self, pred: torch.Tensor, real: torch.Tensor, epoch: int, show: bool = False):
+    def __call__(self, pred: torch.Tensor, real: torch.Tensor, epoch: int=-1, show: bool = False):
         '''
         real has shape (b,)
         pred has shape (b, num_class)
@@ -28,6 +28,7 @@ class ClassificationMetrics():
         confusion_matrix = self.confusion_matrix(real, pred_class)
         cm_display = ConfusionMatrixDisplay(confusion_matrix).plot()
         self.TBwriter.add_figure("confusion_matrix", cm_display.figure_, epoch)
+        res={}
         for metric_name, metric_func in self.dictMetrics.items():
             metric_value = metric_func(real, pred_class)
             self.TBwriter.add_scalar(f"classification/{metric_name}", metric_value, epoch)
@@ -35,4 +36,6 @@ class ClassificationMetrics():
                 print(f"{metric_name}: {metric_value}")
             if metric_name == 'f1_score':
                 self.score = metric_value
+            res[metric_name] = metric_value
+        return res
         
