@@ -90,7 +90,7 @@ class TransformerClassificationModel(nn.Module):
         z = self.fc1(x)
         z = self.activation(z)
         z = self.fc2(z)
-        # x = self.softmax(x)
+        x = self.softmax(x)
         return x
     def load(self, path):
         if path is not None:

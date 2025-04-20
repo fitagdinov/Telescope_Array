@@ -37,7 +37,7 @@ config = 'config.yaml'
 model = pipline.Pipline(config)
 model.config['latent_dim'] = 8
 exp = 'Fe_Pr18.01.2025_15:29latent_dim=16;_hidden_dim=512;_use_mask=True;_'
-chpt = "../../Models/AutoEncoder/Proton_train_lat=8/best"
+chpt = "../../Models/AutoEncoder/Proton_train_lat=16/best"
 model.load_chpt(chpt)
 latent_list, params, loss = model.predict_latent(write_embedding=False, choise_num = 100000)
 
@@ -55,7 +55,7 @@ X = select_dict['pr'][:60000]
 X_test = select_dict['pr'][60000:]
 Y = select_dict['photon']
 
-for bandwidth in tqdm(np.arange(0.4 ,5.5,0.2)):
+for bandwidth in tqdm(np.arange(0.01, 0.2, 0.02)):
     print(f'start bandwidth={bandwidth}', file = f_output)
     kde = KernelDensity(kernel="gaussian", bandwidth=bandwidth).fit(X)
     log_dens = kde.score_samples(X)
@@ -76,9 +76,9 @@ for bandwidth in tqdm(np.arange(0.4 ,5.5,0.2)):
     #hists
     fig, axs = plt.subplots(4,1, figsize=(10,40))
     x_lim=0.002
-    axs[0].hist(np.exp(log_dens), bins=100, color=(0,1,0,0.1),density=True, label = "Train")
-    axs[1].hist(np.exp(log_dens_Y), bins=100, color=(0,0,0,0.5),density=True, label = "photon")
-    axs[2].hist(np.exp(log_dens_pr_test), bins=100, color=(1,0,0,0.5), density=True, label = "Test_pr")
+    axs[0].hist(np.exp(log_dens), bins=100, color=(0,1,0,0.1),density=True, label = "Train", log=True)
+    axs[1].hist(np.exp(log_dens_Y), bins=100, color=(0,0,0,0.5),density=True, label = "photon", log=True)
+    axs[2].hist(np.exp(log_dens_pr_test), bins=100, color=(1,0,0,0.5), density=True, label = "Test_pr", log=True)
     axs[0].legend()
     axs[1].legend()
     axs[2].legend()
@@ -88,9 +88,9 @@ for bandwidth in tqdm(np.arange(0.4 ,5.5,0.2)):
     axs[2].set_title('test_pr')
     
     
-    axs[3].hist(np.exp(log_dens), bins=100, color=(0,1,0,0.1),density=True, label = "Train")
-    axs[3].hist(np.exp(log_dens_Y), bins=100, color=(0,0,0,0.5),density=True, label = "photon")
-    axs[3].hist(np.exp(log_dens_pr_test), bins=100, color=(1,0,0,0.5), density=True, label = "Test_pr")
+    axs[3].hist(np.exp(log_dens), bins=100, color=(0,1,0,0.1),density=True, label = "Train", log=True)
+    axs[3].hist(np.exp(log_dens_Y), bins=100, color=(0,0,0,0.5),density=True, label = "photon", log=True)
+    axs[3].hist(np.exp(log_dens_pr_test), bins=100, color=(1,0,0,0.5), density=True, label = "Test_pr", log=True)
     axs[3].legend()
     axs[3].set_title(f'all less {less_01} more {more_90}')
     plt.savefig(f'hists/bandwidth={bandwidth}.png')

@@ -107,14 +107,17 @@ class ClassificationPipline(Pipline):
             self.best_score = self.Metrics.score
             torch.save(self.model.state_dict(), os.path.join(self.PATH, f'best'))
         self.writer.add_scalar("val/Loss", np.mean(loss_mean), epoch)
-    def test(self, chpt:str):
+    def test(self, chpt:str, getting_dataloader = None):
         self.model.load(chpt)
         self.model.eval()
         y_preds = None
         y_target = None
+        if getting_dataloader is None:
+            getting_dataloader = self.val_loaders[0]
+        print(getting_dataloader)
         with torch.no_grad():
             # self.val_loaders is list which has one dataloader if many_val_loaders = Flase in piplene
-            for x, part, _ in tqdm(self.val_loaders[0]):
+            for x, part, _ in tqdm(getting_dataloader):
                 x = x.to(self.device)
                 part = torch.where(part == 1, 0, 1).to(self.device) # 0- photon, 1- proton
                 pred_mass = self.model(x)
