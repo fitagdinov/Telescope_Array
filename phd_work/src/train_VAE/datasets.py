@@ -206,7 +206,7 @@ def wrapper_mask(func, *args, **kwargs):
     start_token = kwargs['start_token']
     stop_token = kwargs['stop_token']
 
-    def wrapper_fNoneunc(batch):
+    def wrapper_func(batch):
         return func(batch, **kwargs)
 
     return wrapper_func
