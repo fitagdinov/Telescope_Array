@@ -3,11 +3,11 @@ import h5py as h5
 import os
 from tqdm import tqdm
 MC_dir_path = '/home/rfit/Telescope_Array/phd_work/data/'
-h5_in = 'fe_q4_14yr_e1.h5'
+h5_in = 'pr_q4_14yr_e1.h5'
 
 # passed cuts: anisotropy, spectrum, composition, gamma
 # anisotropy, spectrum, composition, gamma
-filt_cuts = np.array([0,1,1,0])
+filt_cuts = np.array([0,0,0,1])
 
 exclude_saturated = False
 exclude_geom_fit = False
@@ -17,7 +17,9 @@ keys_to_pull += ['mc_params','reco_ivanov','reco_ivanov_params']
 
 h5_out = h5_in[:-3]+'_'+''.join([str(f) for f in filt_cuts])+'_excl_sat_'+str(exclude_saturated)[0]+'_excl_geo_'+str(exclude_geom_fit)[0]+'.h5'
 h5_in = MC_dir_path+'h5s/'+h5_in
-h5_out = MC_dir_path+'filtered/'+h5_out
+
+MC_dir_path_new = '/home3/rfit/Telescope_Array/phd_work/data/'
+h5_out = MC_dir_path_new+'filtered/'+h5_out
 
 # ensure that there are no anomaleous events
 E_cut = 2e3
