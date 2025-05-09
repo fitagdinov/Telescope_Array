@@ -12,15 +12,13 @@ class VariableLengthDataset(Dataset):
         Args:
             data: список тензоров, где каждый тензор имеет форму (seq_len, 6)
         """
-        
+        # Запись в генерации h5 file
         self.mass_dict = {'pr': 14,
                      'photon': 1,
                      'fe': 5626}
         self.paticles = paticles
-        print('mc_params',mc_params)
         data, ev_starts, mc_params = self.read_h5(data_path, mode, mc_params, paticles)
         # prepoccessing
-        # data = self.preprocc_signal(data, 3)
         self.data = data
         self.ev_starts = ev_starts
         self.mc_params = mc_params
@@ -34,13 +32,14 @@ class VariableLengthDataset(Dataset):
         fn = self.ev_starts[idx + 1]
         
         mc_params = self.mc_params[idx]
-        if self.mc_params is not None:
-            return torch.tensor(self.data[st:fn]), torch.tensor(mc_params[1]), torch.tensor(mc_params)
-        else:
-            return torch.tensor(self.data[st:fn]), torch.tensor(mc_params[1])
+        return torch.tensor(self.data[st:fn]), torch.tensor(mc_params[1]), torch.tensor(mc_params)
     def read_h5(self, data_path, mode, mc_params, paticles: Optional[List[str]] = None):
+        """
+        Читает .h5 файл, выбирает нужный режим и фильтрует события по частицам.
+        """
         with h5.File(data_path,'r') as f:
-            print('keys', list(f.keys()))
+            if mode not in f:
+                raise KeyError(f"В файле нет группы '{mode}'. Доступные ключи: {list(f.keys())}")
             train = f[mode]
             dt_params = torch.tensor(train['dt_params'][()])
             ev_starts = torch.tensor(train['ev_starts'][()])
@@ -58,58 +57,41 @@ class VariableLengthDataset(Dataset):
         #1. mc_parttype (CORSIKA, 1 - gamma, 14 - proton, 5626 - Fe)
         mass_dict = self.mass_dict
         return [mass_dict[n] for n in name]
-    def choise_def_particles_2(self, name: List[str],data, ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
-        mass = self.str2mass(name)
-        data_shape = list(data.shape)
-        data_shape[0]=0
-        data_shape=tuple(data_shape)
-        data_new = torch.zeros(data_shape, dtype=data.dtype, device=data.device)
-        ev_starts_new = torch.tensor([0], dtype=torch.long)
-        if get_mc_params:
-            mc_params_shape = list(mc_params.shape)
-            mc_params_shape[0]=0
-            mc_params_shape=tuple(mc_params_shape)
-            mc_params_new = torch.zeros(mc_params_shape, dtype=mc_params.dtype, device=mc_params.device)
-        for i in tqdm(range(len(mc_params))):
-            p=mc_params[i,par_num]
-            if p in mass:
-                ev_s = ev_starts[i]
-                ev_f = ev_starts[i+1]
-                data_new = torch.concat([data_new, data[ev_s:ev_f]], dim=0)
-                ev_starts_new = torch.concat([ev_starts_new, torch.tensor([ev_f-ev_s], dtype=torch.long)])
-                if get_mc_params:
-                    mc_params_new = torch.concat([mc_params_new, mc_params[i]], dim=1)
-        if get_mc_params:
-            return data_new, ev_starts_new, mc_params_new
-        else:
-            return data_new, ev_starts_new
     def choise_def_particles(self, name: List[str], data, ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
+        """
+        Фильтрует события по типам частиц.
+
+        Аргументы:
+            name (List[str]): Список имён частиц (например, ['photon']).
+            data (Tensor): Все данные по событиям.
+            ev_starts (Tensor): Индексы начала событий.
+            mc_params (Tensor): Метаданные событий.
+            par_num (int): Индекс параметра с массой частицы.
+            get_mc_params (bool): Вернуть ли отфильтрованные mc_params.
+
+        Возвращает:
+            Tuple[Tensor, Tensor, Optional[Tensor]]: Отфильтрованные данные, ev_starts, опционально — mc_params.
+        """        
         # Преобразуем имена частиц в массы
         mass = self.str2mass(name)
-        
         # Создаем маску для выбора нужных частиц
         mask = torch.isin(mc_params[:, par_num], torch.tensor(mass, device=mc_params.device))
-        
         # Применяем маску к mc_params и ev_starts
         mc_params_filtered = mc_params[mask]
-        ev_starts_filtered = ev_starts[:-1][mask]  # Исключаем последний элемент ev_starts, так как он не соответствует событию
-        
         # Вычисляем новые индексы начала событий
-        ev_starts_new = torch.cat([torch.tensor([0], device=data.device), torch.cumsum(ev_starts[1:][mask] - ev_starts[:-1][mask], dim=0)])
-        
+        ev_starts_new = torch.cat([torch.tensor([0], device=data.device), torch.cumsum(ev_starts[1:][mask] - ev_starts[:-1][mask], dim=0)])  
         # Собираем данные, соответствующие выбранным событиям
         try:
             data_indices = torch.cat([torch.arange(ev_starts[i], ev_starts[i+1], device=data.device) for i in torch.where(mask)[0]])
             data_new = data[data_indices]
         except NotImplementedError:
-            raise NotImplementedError(f"Probably this particle was not find in this file. Total ev_starts is {len(ev_starts)}")
+            raise NotImplementedError("Не найдены события с заданными частицами.")
         if get_mc_params:
             return data_new, ev_starts_new, mc_params_filtered
         else:
             return data_new, ev_starts_new
     def cut_ev_start(self, name: List[str], ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
         mass = self.str2mass(name)
-        data = torch.tensor([], dtype=torch.long)  # Используем CPU
         for i, m in enumerate(mass):
             where_ = torch.where(mc_params[:, par_num] == m)[0]
             where = torch.cat((where, where_))
@@ -121,7 +103,6 @@ class VariableLengthDataset(Dataset):
             return ev_starts, mc_params
         else:
             return ev_starts
-    
 def get_params_mask(config):
     """
     This function extracts and prepares start, stop tokens, and padding value from a given configuration dictionary.
@@ -141,7 +122,6 @@ def get_params_mask(config):
     start_token = config['start_token']
     stop_token = config['stop_token']
     padding_value = config['padding_value']
-
     if isinstance(start_token,int):
         start_token = torch.ones((1,6)) * start_token
     elif isinstance(start_token, str):
@@ -159,8 +139,6 @@ def get_params_mask(config):
 
     stop_token = torch.ones((1,6)) * stop_token
     return {'start_token': start_token, 'stop_token': stop_token, 'padding_value': padding_value}
-
-# @wrapper_func()
 def collate_fn_many_args(batch: Tensor, start_token: Tensor, stop_token: Tensor, padding_value: int, mc_params: bool = False) -> Tensor:
     #, padding_value, star_token, stop_toke
     """
@@ -202,11 +180,12 @@ def wrapper_mask(func, *args, **kwargs):
     Returns:
     - wrapper_func (function): The wrapped function that applies the start and stop tokens, pads the sequences, and calls the original function.
     """
-    padding_value = kwargs['padding_value']
-    start_token = kwargs['start_token']
-    stop_token = kwargs['stop_token']
 
+    # Used and need
+
+    # padding_value = kwargs['padding_value']
+    # start_token = kwargs['start_token']
+    # stop_token = kwargs['stop_token']
     def wrapper_func(batch):
         return func(batch, **kwargs)
-
     return wrapper_func

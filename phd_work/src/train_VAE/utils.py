@@ -122,3 +122,32 @@ def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None,
     lenght_info = f'real_lenght {real_lenght}\nfake_lenght {fake_lenght}'
     plt.suptitle(lenght_info)
     return fig
+
+
+# Tresh
+    # Unneded
+# def choise_def_particles_2(self, name: List[str],data, ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
+#     mass = self.str2mass(name)
+#     data_shape = list(data.shape)
+#     data_shape[0]=0
+#     data_shape=tuple(data_shape)
+#     data_new = torch.zeros(data_shape, dtype=data.dtype, device=data.device)
+#     ev_starts_new = torch.tensor([0], dtype=torch.long)
+#     if get_mc_params:
+#         mc_params_shape = list(mc_params.shape)
+#         mc_params_shape[0]=0
+#         mc_params_shape=tuple(mc_params_shape)
+#         mc_params_new = torch.zeros(mc_params_shape, dtype=mc_params.dtype, device=mc_params.device)
+#     for i in tqdm(range(len(mc_params))):
+#         p=mc_params[i,par_num]
+#         if p in mass:
+#             ev_s = ev_starts[i]
+#             ev_f = ev_starts[i+1]
+#             data_new = torch.concat([data_new, data[ev_s:ev_f]], dim=0)
+#             ev_starts_new = torch.concat([ev_starts_new, torch.tensor([ev_f-ev_s], dtype=torch.long)])
+#             if get_mc_params:
+#                 mc_params_new = torch.concat([mc_params_new, mc_params[i]], dim=1)
+#     if get_mc_params:
+#         return data_new, ev_starts_new, mc_params_new
+#     else:
+#         return data_new, ev_starts_new
