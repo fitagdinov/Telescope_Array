@@ -1,9 +1,10 @@
 mode: Latent
 input_dim: 6
-hidden_dim: 512
+hidden_dim: 128
 latent_dim: 16
-batch_size: 2000
-lr: 1e-3
+num_layers: 10
+batch_size: 150
+lr: 1e-4
 epoches: 100
 lstm2: False
 #data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
@@ -24,10 +25,10 @@ paticles:
     - pr
     - photon
 
-koef_loss: [0,0,0,0,0,1]
+koef_loss: [1,1,0,1,1,1]
 exp: AutoEncoder
 use_mask: True
-PATH: 'ONLY_LAST_CHANAL'
+PATH: Encoder_2Transformer_10layers_CLS_CONT_BUT_128HID_EQUAL
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder
 show_index:
   - 10
@@ -37,4 +38,4 @@ write_param:
   # - 'hidden_dim'
   - 'paticles'
 chpt: None
-# chpt: /home/rfit/Telescope_Array/phd_work/src/train_VAE/test_particles/Pr_latent_64latent_dim=64;_paticles=['pr'];_/best
+# chpt: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_2Transformer_CLS/best

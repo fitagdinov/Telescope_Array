@@ -75,7 +75,10 @@ def vae_loss(recon_x, x, mu, log_var, pred_num, pred_part, real_part, mask = -10
     koef_loss = koef_loss.unsqueeze(0)
     recon_loss = nn.MSELoss(reduction='none')(recon_x, x) # return shape - batch, det, featch
     recon_loss *= koef_loss
-    kl_divergence = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    try:
+        kl_divergence = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    except TypeError:
+        kl_divergence = torch.zeros_like(recon_loss)
     # подсчет кол-ва детекторов в событии
     # mask = calc_det(x, mask)
     if use_mask:

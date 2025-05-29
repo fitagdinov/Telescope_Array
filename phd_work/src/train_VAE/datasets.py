@@ -189,3 +189,28 @@ def wrapper_mask(func, *args, **kwargs):
     def wrapper_func(batch):
         return func(batch, **kwargs)
     return wrapper_func
+
+
+class AugmentationCoordinatsFlip:
+    """ Отражение по оси
+
+    """
+
+    def __call__(self, sample: torch.Tensor) -> torch.Tensor:
+        xProb, yProb = torch.randn(2)
+        if xProb > 0.5:
+            sample[0] = -sample[0]
+        if yProb > 0.5:
+            sample[1] = -sample[1]
+        return sample
+class AugmentationCoordinatsRound:
+
+
+    def __call__(self, sample: torch.Tensor) -> torch.Tensor:
+        xProb, yProb = torch.randn(2)
+        if xProb > 0.5:
+            sample[0] = -sample[0]
+        if yProb > 0.5:
+            sample[1] = -sample[1]
+        return sample
+    

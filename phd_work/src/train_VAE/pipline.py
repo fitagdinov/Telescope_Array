@@ -93,12 +93,20 @@ class Pipline():
             val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
             val_loaders = [val_loader]        
         start_token = kwargs['start_token'].to(device)
-        model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], lstm2=config['lstm2'], start_token=start_token).to(device)
+        model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], lstm2=config['lstm2'], start_token=start_token,
+                          padding_value = config['padding_value'],
+                          stop_token = config['stop_token']).to(device)
         if config['chpt'] != 'None':
             model.load(config['chpt'])
+
+        # differnet optimize
+
         optimizer = optim.Adam(model.parameters(), lr=float(config['lr']))
+        # optimizer = optim.Adam(model.encoder.parameters(), lr=float(config['lr']))
+        # optimizer_decoder = optim.Adam(model.decoder.parameters(), lr=float(config['lr'])*10)
         # write augmentes
         self.optimizer = optimizer
+        # self.optimizer_decoder = optimizer_decoder
         self.train_loader = train_loader
         self.model = model
         self.writer = writer
@@ -156,12 +164,15 @@ class Pipline():
                 x = x.to(device)
                 part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                 self.optimizer.zero_grad()
+                # self.optimizer_decoder.zero_grad()
                 recon_x, mu, log_var, pred_num, pred_mass = self.model(x)
                 recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
                                                                                     mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss
                                                                                     )
                 num_det_loss *= self.koef_DL
                 kl_divergence *= self.koef_KL
+                # из-за тупизны в выходе model
+                kl_divergence = 0
                 mass_loss *= self.koef_mass
                 loss = recon_loss + kl_divergence + num_det_loss + mass_loss
                 self.writer.add_scalar("train/Loss", loss, iters)
@@ -171,6 +182,7 @@ class Pipline():
                 self.writer.add_scalar("train/mass_loss", mass_loss, iters)
                 loss.backward()
                 self.optimizer.step()
+                # self.optimizer_decoder.step()
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
                 iters += 1
             
@@ -218,6 +230,7 @@ class Pipline():
             if loss_final<self.loss_best:
                 self.loss_best = loss_final
                 torch.save(model.state_dict(), os.path.join(self.PATH, f'best'))
+            torch.save(model.state_dict(), os.path.join(self.PATH, f'last'))
 
             print(f'Epoch {epoch + 1}, Loss: {loss_final} loss_best {self.loss_best}')
 
@@ -253,9 +266,10 @@ class Pipline():
             mass_loss *= self.koef_mass
             kl_divergence *= koef_KL
             num_det_loss *= koef_DL
-            loss = recon_loss + kl_divergence + num_det_loss
+            # Убрал + kl_divergence из-за ненадобнасоти и ломания кода
+            loss = recon_loss  + num_det_loss
             loss_mean.append(loss.item())
-            KL_loss_mean.append(kl_divergence.item())
+            # KL_loss_mean.append(kl_divergence.item())
             recon_loss_mean.append(recon_loss.item())
             num_det_loss_mean.append(num_det_loss.item())
             pbar_val.set_description(f"VAL Epoch {epoch + 1} in {particle}, Loss: {loss.item():.4f}")
@@ -269,6 +283,7 @@ class Pipline():
 
         #show from last batch
         real = x[self.show_index]
+        print('recon_x.shape', recon_x.shape)
         fake = recon_x[self.show_index]
         num = pred_num[self.show_index]
         for ii in range(len(self.show_index)):
