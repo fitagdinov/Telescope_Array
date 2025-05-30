@@ -95,7 +95,8 @@ class Pipline():
         start_token = kwargs['start_token'].to(device)
         model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], lstm2=config['lstm2'], start_token=start_token,
                           padding_value = config['padding_value'],
-                          stop_token = config['stop_token']).to(device)
+                          stop_token = config['stop_token'],
+                          num_layers = config['num_layers']).to(device)
         if config['chpt'] != 'None':
             model.load(config['chpt'])
 

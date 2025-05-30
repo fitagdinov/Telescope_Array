@@ -382,13 +382,15 @@ class VAE(nn.Module):
         num_part (int): Количество классов в масс-спектре.
     """
     def __init__(self, input_dim=5, hidden_dim=32, latent_dim=1, start_token: Tensor = torch.zeros(1,6), lstm2: bool = False, lstm3: bool = False, num_part: int = 2,
+                 num_layers = 2,
                  **kwargs ) -> None:
         super(VAE, self).__init__()
         # self.encoder = Encoder(input_dim, hidden_dim, latent_dim, lstm2=lstm2, lstm3=lstm3 )
         self.encoder = Encoder_Transformer(input_dim, hidden_dim, latent_dim,
-                                            num_layers=kwargs["num_layers"], **kwargs)
+                                            num_layers=num_layers, **kwargs)
         # self.decoder = Decoder(latent_dim, hidden_dim, input_dim, hidden_dim_latent)
-        self.decoder = DecoderRNN(latent_dim, hidden_dim, input_dim, start_token, lstm2=lstm2, lstm3=lstm3, num_part=num_part)
+        hidden_dim_decoder = 512
+        self.decoder = DecoderRNN(latent_dim, hidden_dim_decoder, input_dim, start_token, lstm2=lstm2, lstm3=lstm3, num_part=num_part)
         # self.decoder = DecoderTransformer(latent_dim, hidden_dim, input_dim, start_token, num_part=num_part)
         print("Encoder has params:", self.count_parameters(self.encoder),"Decoder has params:", self.count_parameters(self.decoder))
     def reparameterize(self, mu, log_var, koef=1):
