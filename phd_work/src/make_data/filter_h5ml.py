@@ -1,16 +1,52 @@
+"""
+Скрипт: filter_hdf5_photon_data.py
+
+Назначение:
+    Фильтрация и сохранение подвыборки данных из большого HDF5-файла 
+    (симуляции фотонов для проекта Telescope Array). 
+    Применяются физические срезы (cuts), удаляются аномальные события 
+    и некачественные детекторы, результат сохраняется в новый HDF5.
+
+Аргументы / Переменные:
+    MC_dir_path       : путь к входным данным (HDF5).
+    h5_in             : имя входного HDF5-файла.
+    filt_cuts         : массив с фильтрами [анизотропия, спектр, состав, гамма],
+                        0 – не фильтровать, 1 – оставить только прошедшие cut.
+    exclude_saturated : True – исключить насыщенные детекторы (dt_mask[:,0]).
+    exclude_geom_fit  : True – исключить детекторы с плохой геометрией (dt_mask[:,1]).
+    keys_to_pull      : список ключей (dataset'ов), которые копируются в выходной файл.
+    h5_out            : путь к выходному HDF5 (генерируется автоматически).
+    E_cut             : верхний порог энергии; события выше отбрасываются.
+    time_up           : порог времени; большие значения сдвигаются на 1e6.
+    iter_step         : размер чанка (сколько строк читается/пишется за раз).
+
+Этапы работы:
+    1. Чтение входного файла и применение срезов для событий и детекторов.
+    2. Исключение насыщенных и некорректных по геометрии детекторов.
+    3. Поочередное копирование данных (с чанками для экономии памяти).
+    4. Коррекция времени в dt_params.
+    5. Пересчёт индексов событий (ev_starts).
+    6. Сохранение результата в новый HDF5-файл.
+
+Вывод:
+    Новый HDF5-файл с именем:
+        photon_14yr_0001_excl_sat_T_excl_geo_T.h5
+    Содержит только события и детекторы, прошедшие все указанные условия.
+"""
+
 import numpy as np
 import h5py as h5
 import os
 from tqdm import tqdm
-MC_dir_path = '/home/rfit/Telescope_Array/phd_work/data/'
-h5_in = 'pr_q4_14yr_e1.h5'
+MC_dir_path = '/home3/rfit/Telescope_Array/phd_work/data/'
+h5_in = 'photon_14yr.h5'
 
 # passed cuts: anisotropy, spectrum, composition, gamma
 # anisotropy, spectrum, composition, gamma
 filt_cuts = np.array([0,0,0,1])
 
-exclude_saturated = False
-exclude_geom_fit = False
+exclude_saturated = True
+exclude_geom_fit = True
 
 keys_to_pull = ['ev_ids','reco_rubtsov','reco_rubtsov_params','bdt_params','dt_params','dt_wfs','dt_ids', 'dt_mask']
 keys_to_pull += ['mc_params','reco_ivanov','reco_ivanov_params']
@@ -38,12 +74,12 @@ with h5.File(h5_in,'r') as hi, h5.File(h5_out,'w') as ho:
     mask_evs = np.logical_and( passed_cuts, passed_es )
     # make mask for detectors
     mask_hits = np.full( num_dets, True )
-    # if exclude_saturated: # исключение по энергии
-    #     not_pass = hi['dt_mask'][:,0]
-    #     mask_hits = np.logical_and( mask_hits, ~not_pass )
-    # if exclude_geom_fit: # исключение по геом. фиту
-    #     not_pass = hi['dt_mask'][:,1]
-    #     mask_hits = np.logical_and( mask_hits, ~not_pass )
+    if exclude_saturated: # исключение по энергии
+        not_pass = hi['dt_mask'][:,0]
+        mask_hits = np.logical_and( mask_hits, ~not_pass )
+    if exclude_geom_fit: # исключение по геом. фиту
+        not_pass = hi['dt_mask'][:,1]
+        mask_hits = np.logical_and( mask_hits, ~not_pass )
     ev_starts = hi['ev_starts'][:]
     ev_lens = np.diff( ev_starts )
     mask_evs_to_hits = np.repeat( mask_evs, ev_lens )
@@ -62,20 +98,24 @@ with h5.File(h5_in,'r') as hi, h5.File(h5_out,'w') as ho:
         shape = hi[key].shape[1:]
         num_entrs = np.sum(mask)
         ds = ho.create_dataset( key, shape=np.concatenate( ([num_entrs],shape) ), dtype=hi[key].dtype )
-        while proc<to_proc:
-            step = min(iter_step,to_proc-proc)
-            l_mask = mask[proc:proc+step]
-            to_write = np.sum(l_mask)
-            # correct times
-            if key=='dt_params':
-                data = hi[key][proc:proc+step][l_mask]
-                # TODO (check)
-                data[:,-1] = np.where( data[:,-1]<time_up, data[:,-1], data[:,-1]-1e6 )
-                ds[wrtn:wrtn+to_write] = data
-            else:
-                ds[wrtn:wrtn+to_write] = hi[key][proc:proc+step][l_mask]
-            proc += step
-            wrtn += to_write
+        with tqdm(total=to_proc, desc=f"Processing {key}", leave=False) as pbar:
+            while proc<to_proc:
+                step = min(iter_step,to_proc-proc)
+                l_mask = mask[proc:proc+step]
+                to_write = np.sum(l_mask)
+                # correct times
+                if key=='dt_params':
+                    data = hi[key][proc:proc+step][l_mask]
+                    # TODO (check)
+                    data[:,-1] = np.where( data[:,-1]<time_up, data[:,-1], data[:,-1]-1e6 )
+                    ds[wrtn:wrtn+to_write] = data
+                else:
+                    ds[wrtn:wrtn+to_write] = hi[key][proc:proc+step][l_mask]
+                proc += step
+                wrtn += to_write
+
+                #update time bar
+                pbar.update(step)
     # recalc ev length
     new_ev_lens = np.array([ np.sum( mask_hits[ev_starts[i]:ev_starts[i+1]] ) for i in range(num_evs) ])
     new_ev_lens = new_ev_lens[mask_evs]

@@ -1,3 +1,5 @@
+import sys
+sys.path.append('/home/rfit/Telescope_Array/phd_work/src')
 from tqdm import tqdm
 import argparse
 import h5py as h5
@@ -13,19 +15,19 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Using device:', device)
 import model as Model
-import datasets as DataSet
-import loss as Loss
+import train_VAE.datasets as DataSet
+from loss import MaskLoss
 from typing import Optional, Tuple, Union
 
 from torch.utils.tensorboard import SummaryWriter
 
 
-from utils import get_time, get_params_str, show_pred, read_config, clean_mask, MCPAR_index2srt
+from train_VAE.utils import get_time, get_params_str, show_pred, read_config, clean_mask, MCPAR_index2srt
 import logging
 import tensorflow as tf
 import tensorboard as tb
 tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
-
+# from train_VAE.pipline import Pipline
 logger = logging.getLogger()
 class Pipline():
     """
@@ -79,7 +81,10 @@ class Pipline():
             dataset = DataSet.VariableLengthDataset(config['data_path'], 'train',
                                                     paticles=config['paticles']['train'],
                                                     mc_params=True,
-                                                    reconstruction_params=config['reconstruction_params'])
+                                                    reconstruction_params=config['reconstruction_params'],
+                                                    change_coordinat=config['change_coordinat'],
+                                                    change_sort=config['change_sort'],
+                                                    )
             train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True, collate_fn=collate_fn)
         else:
             dataset = None
@@ -90,39 +95,33 @@ class Pipline():
             for p in config['paticles']['test']:
                 val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test',
                                                             paticles=[p], mc_params=True,
-                                                            reconstruction_params=config['reconstruction_params'])
+                                                            reconstruction_params=config['reconstruction_params'],
+                                                            change_coordinat=config['change_coordinat'],
+                                                            change_sort=config['change_sort'],
+                                                            )
                 val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
                 val_loaders.append(val_loader)
         else:
             val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test',
                                                         paticles=config['paticles']['test'],
                                                         mc_params=True,
-                                                        reconstruction_params=config['reconstruction_params']
+                                                        reconstruction_params=config['reconstruction_params'],
+                                                        change_coordinat=config['change_coordinat'],
+                                                        change_sort=config['change_sort'],
                                                         )
             val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
             val_loaders = [val_loader]        
         start_token = kwargs['start_token'].to(device)
-        model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], lstm2=config['lstm2'], start_token=start_token,
-                          padding_value = config['padding_value'],
-                          stop_token = config['stop_token'],
-                          num_layers = config['num_layers'],
-                          reconstruction_params = config['reconstruction_params'],
-                          ).to(device)
+        model = Model.EncoderTransformerMask(**config,
+                                                ).to(device)
         if config['chpt'] != 'None':
             model.load(config['chpt'])
-
-        # differnet optimize
-
-        # optimizer = optim.Adam(model.parameters(), lr=float(config['lr']))
-        optimizer = optim.AdamW(model.encoder.parameters(), lr=float(config['lr'])*10)
-        optimizer_decoder = optim.AdamW(model.decoder.parameters(), lr=float(config['lr']))
-        # write augmentes
-        self.optimizer = optimizer
-        self.optimizer_decoder = optimizer_decoder
         self.train_loader = train_loader
         self.model = model
         self.writer = writer
-        return {'train_loader': train_loader, 'val_loaders': val_loaders, 'model': model, 'optimizer': optimizer, 'writer': writer}
+
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=float(config['lr']))
+        return {'train_loader': train_loader, 'val_loaders': val_loaders, 'model': model, 'writer': writer}
     def load_chpt(self, chpt_path: str):
         """
         Загрузка весов модели из чекпоинта.
@@ -144,7 +143,7 @@ class Pipline():
         self.train_loader = prepipline_dict['train_loader']
         self.val_loaders = prepipline_dict['val_loaders']
         self.model = prepipline_dict['model']
-        self.optimizer = prepipline_dict['optimizer']
+        # self.optimizer = prepipline_dict['optimizer']
         self.writer = prepipline_dict['writer']
         self.epochs = config['epoches']
         self.mask = config['padding_value']
@@ -161,6 +160,49 @@ class Pipline():
         self.koef_loss = koef_loss.to(device)
         os.makedirs(PATH, exist_ok = True)
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', factor=0.2, patience=5, threshold=0.005,)
+
+
+class PiplineMask(Pipline):
+    def __init__(self, config, need_train_DS: bool = True, many_val_loaders: bool = True):
+        
+        super().__init__(config)
+
+        self.Loss = MaskLoss(reduction='mean')
+        print(self.config['input_dim'],
+            self.config['hidden_dim'], 
+            self.config['latent_dim'],
+            self.config['num_layers'])
+        self.model = Model.EncoderTransformerMask(
+                                                input_dim=self.config['input_dim'],
+                                                hidden_dim=self.config['hidden_dim'], 
+                                                latent_dim=self.config['latent_dim'],
+                                                stop_token=self.config['stop_token'],
+                                                num_layers=self.config['num_layers'],
+                                                padding_value=self.config['padding_value'],
+                                                start_token=self.config['start_token'],
+                                                ).to(device)
+        optimizer = optim.Adam(self.model.parameters(), lr=float(self.config['lr']))
+        self.optimizer = optimizer
+        pass
+    
+
+    def random_mask(self, x: torch.Tensor, probability: float, mask_v: float = -11) -> torch.Tensor:
+        # рызыгрывать вероятности а не индексы. 
+        device = x.device
+
+        token_mask = (x[:,:,0:1] != mask_v).to(device)  # [batch, maxlen]
+        token_mask[:, 0] = False  # исключаем первый токен
+
+        index = torch.sum(token_mask, dim=1)[:,0] # one dim -> batch
+        token_mask[torch.arange(index.size(0)), index] = False
+        
+        probability_tensor = torch.rand_like(x[:,:,0:1]) # batch, len, 1
+        probability_tensor = probability_tensor*token_mask # zero in supportive tokens
+        token_mask = torch.where(probability_tensor>(1-probability), 1, 0).to(device)
+        # to shape -> batch, len, 6
+        token_mask = torch.repeat_interleave(token_mask, 6, dim=2).to(device).to(torch.bool)
+        return token_mask
+
     def train(self):
         """
         Обучает модель VAE и логирует метрики в TensorBoard.
@@ -168,47 +210,23 @@ class Pipline():
         self.loss_best = 1000
         iters = 0
         for epoch in range(self.epochs):
-            print('lr_scheduler', self.optimizer.param_groups[0]['lr'])
             self.writer.add_scalar("lr_scheduler", self.optimizer.param_groups[0]['lr'], epoch)
             self.model.train()
             pbar = tqdm(self.train_loader, desc =f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: 0.0")
-            for x, part, params_CR in pbar:  # x должен быть пакетом последовательностей с заполнением
-                # x- data
-                # part - promt mc_params in h5(look dataset.py)
-                # params_CR by reconstruction index
-
+            for x, part, params_CR in pbar:
                 x = x.to(device)
+                # get mask
+                x_mask = self.random_mask(x, probability=float(self.config['probability']), mask_v = self.config['padding_value']).to(device)
                 part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
+                # print(part, part.shape)
                 params_CR = params_CR.to(device) 
                 self.optimizer.zero_grad()
-                self.optimizer_decoder.zero_grad()
-                recon_x, mu, log_var, pred_num, recon_pred = self.model(x)
-                recon_loss, kl_divergence, num_det_loss, recon_params_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
-                                                                                    recon_pred,
-                                                                                    params_CR, 
-                                                                                    part,
-                                                                                    mask=self.mask,
-                                                                                    use_mask=self.use_mask,
-                                                                                    koef_loss=self.koef_loss
+                recon_x = self.model(x, x_mask)
+                loss = self.Loss(recon_x, x, x_mask) # part
 
-                                                                                    )
-                num_det_loss *= self.koef_DL
-                kl_divergence *= self.koef_KL
-                recon_params_loss *= self.koef_mass
-                # из-за тупизны в выходе model
-                kl_divergence = 0
-                loss = recon_loss + kl_divergence + num_det_loss + torch.mean(recon_params_loss)
                 self.writer.add_scalar("train/Loss", loss, iters)
-                self.writer.add_scalar("train/KL_loss", kl_divergence, iters)
-                self.writer.add_scalar("train/recon_loss", recon_loss, iters)
-                self.writer.add_scalar("train/num_det_loss", num_det_loss, iters)
-                if self.config['reconstruction_params'] is not None:
-                    for i, ind in enumerate(self.config['reconstruction_params']):
-                        name_param = MCPAR_index2srt(ind)
-                        self.writer.add_scalar(f"train/{name_param}", recon_params_loss[i], iters)
                 loss.backward()
                 self.optimizer.step()
-                self.optimizer_decoder.step()
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
                 iters += 1
             
@@ -231,34 +249,26 @@ class Pipline():
         val_loaders = self.val_loaders
         koef_KL = self.koef_KL
         koef_DL = self.koef_DL
-
+        losses = []
         model.eval()
-        loss_mean = np.array([])
-        KL_loss_mean = np.array([])
-        recon_loss_mean = np.array([])
-        num_det_loss_mean = np.array([])
+        # loss_mean = np.array([])
+        # KL_loss_mean = np.array([])
+        # recon_loss_mean = np.array([])
+        # num_det_loss_mean = np.array([])
         for i, val_loader in enumerate(val_loaders):
             particle = self.config['paticles']['test'][i]
-            loss, KL, recon, num_det = self.validation_step(epoch=epoch, val_loader=val_loader, model=model, koef_KL=koef_KL, koef_DL=koef_DL,particle=particle)
-            loss_mean = np.concatenate((loss_mean, loss))
-            KL_loss_mean = np.concatenate((KL_loss_mean, KL))
-            recon_loss_mean = np.concatenate((recon_loss_mean, recon))
-            num_det_loss_mean = np.concatenate((num_det_loss_mean, num_det))
-            loss_final = loss_mean.mean()
-        # write in TB
-        self.writer.add_scalar("val/Loss/all", loss_final, epoch)
-        # self.writer.add_scalar("val/KL_loss/all", KL_loss_mean.mean(), epoch)
-        self.writer.add_scalar("val/recon_loss/all", recon_loss_mean.mean(), epoch)
-        self.writer.add_scalar("val/num_det_loss/all", num_det_loss_mean.mean(), epoch)
+            loss_final = self.validation_step(epoch=epoch, val_loader=val_loader, model=model, koef_KL=koef_KL, koef_DL=koef_DL,particle=particle)
+            losses.append(loss_final)
+        # # write in TB
         if analys:
             if epoch>0:
-                self.scheduler.step(loss_final)
-            if loss_final<self.loss_best:
-                self.loss_best = loss_final
+                self.scheduler.step(losses[0])
+            if losses[0]<self.loss_best:
+                self.loss_best = losses[0]
                 torch.save(model.state_dict(), os.path.join(self.PATH, f'best'))
             torch.save(model.state_dict(), os.path.join(self.PATH, f'last'))
 
-            print(f'Epoch {epoch + 1}, Loss: {loss_final} loss_best {self.loss_best}')
+            print(f'Epoch {epoch + 1}, Loss: {losses[0]} loss_best {self.loss_best}')
 
     def validation_step(self, epoch: int, val_loader, model,
                     koef_KL=1, koef_DL=1, particle=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -276,67 +286,36 @@ class Pipline():
         Возвращает:
             Кортеж numpy-массивов: полные потери, KL, реконструкция и число детекторов.
         """
-        particle = '' if particle is None else particle
-        loss_mean = []
-        KL_loss_mean = []
-        recon_loss_mean = []
-        num_det_loss_mean = []
-        recon_params_loss_mean = [0]*len(self.config['reconstruction_params'])
-        pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1} in {particle}, Loss: 0.0")
-        num_examples = 0
-        for x, part, params_CR in pbar_val:  # x should be a batch of sequences with padding
-            num_examples += x.size(0)
 
-            with torch.no_grad():
-                x = x.to(device)
-                part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
-                params_CR = params_CR.to(device) 
-                recon_x, mu, log_var, pred_num, recon_pred = model(x)
-                recon_loss, kl_divergence, num_det_loss, recon_params_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
-                                                                                        recon_pred,
-                                                                                        params_CR, 
-                                                                                        part,
-                                                                                        mask=self.mask,
-                                                                                        use_mask=self.use_mask,
-                                                                                        koef_loss=self.koef_loss
+        probability_for_write = [0.1,0.5,0.7]
+        for probability in probability_for_write:
+            particle = '' if particle is None else particle
+            loss_mean = []
+            pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1} in {particle}, Loss: 0.0")
+            num_examples = 0
+            for x, part, params_CR in pbar_val:  # x should be a batch of sequences with padding
+                num_examples += x.size(0)
+                with torch.no_grad(): # float(self.config['probability']
+                    x_mask = self.random_mask(x, probability=probability, mask_v = self.config['padding_value']).to(device)
 
-                                                                                        )
-                kl_divergence *= koef_KL
-                num_det_loss *= koef_DL
-                recon_params_loss *= self.koef_mass
-                # Убрал + kl_divergence из-за ненадобнасоти и ломания кода
-                loss = recon_loss  + num_det_loss + torch.mean(recon_params_loss)
-                loss_mean.append(loss.item())
-                # KL_loss_mean.append(kl_divergence.item())
-                recon_loss_mean.append(recon_loss.to('cpu').item())
-                num_det_loss_mean.append(num_det_loss.item())
-                for i,par in enumerate(recon_params_loss_mean): 
-                    recon_params_loss_mean[i] += recon_params_loss[i].to('cpu').item()
-                pbar_val.set_description(f"VAL Epoch {epoch + 1} in {particle}, Loss: {loss.item():.4f}")
-        # recon_params_loss_mean = torch.concat(recon_params_loss_mean, dim=1).numpy()
-        recon_params_loss_mean = np.array(recon_params_loss_mean)/num_examples
-        loss_final = np.array(loss_mean).mean()
-        # write in TB
-        self.writer.add_scalar(f"val/Loss/{particle}", loss_final, epoch)
-        # self.writer.add_scalar(f"val/KL_loss/{particle}", np.array(KL_loss_mean).mean(), epoch)
-        self.writer.add_scalar(f"val/recon_loss/{particle}", np.array(recon_loss_mean).mean(), epoch)
-        self.writer.add_scalar(f"val/num_det_loss/{particle}", np.array(num_det_loss_mean).mean(), epoch)
-        if self.config['reconstruction_params'] is not None:
-            for i, ind in enumerate(self.config['reconstruction_params']):
-                name_param = MCPAR_index2srt(ind)
-                self.writer.add_scalar(f"val/{name_param}/{particle}", recon_params_loss_mean[i].mean(), epoch)
-
-        #show from last batch
-        real = x[self.show_index]
-        fake = recon_x[self.show_index]
-        num = pred_num[self.show_index]
-        for ii in range(len(self.show_index)):
-            # get from back side
-            i = -ii
-            fig = show_pred(real[i], fake[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = num[i])
-            self.writer.add_figure(f"val/show_pred_{ii}/{particle}", fig, epoch)
-        return np.array(loss_mean), np.array(KL_loss_mean), np.array(recon_loss_mean), np.array(num_det_loss_mean)
-    
+                    x = x.to(device)
+                    part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
+                    params_CR = params_CR.to(device)
+                    recon_x = self.model(x, x_mask)
+                    loss = self.Loss(recon_x, x, x_mask)
+                    pbar_val.set_description(f"VAL {particle} Loss: {loss.item():.4f}")
+                    loss_mean.append(loss.item())
+            loss_final = np.array(loss_mean).mean()
+            # write in TB
+            self.writer.add_scalar(f"val/Loss/{particle}/probability={probability}", loss_final, epoch)
+            real = x[self.show_index]
+            fake = recon_x[self.show_index]
+            for ii in range(len(self.show_index)):
+                # get from back side
+                i = -ii
+                fig = show_pred(real[i], (fake*x_mask[self.show_index])[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = -1)
+                self.writer.add_figure(f"val/show_pred_{ii}/{particle}", fig, epoch)
+        return loss_final
 
     def predict_latent(self, write_embedding: bool = True, choise_num: Optional[int] = None,
                    NoneLoss: bool = False) -> Tuple[torch.Tensor, list, Union[torch.Tensor, list]]:
@@ -456,7 +435,7 @@ class Pipline():
                     recon_x, mu, log_var, pred_num, pred_mass = model(x)
                     if not(NoneLoss):
                         # Можно использовать если понадобятся другие лоссы
-                        recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
+                        recon_loss, kl_divergence, num_det_loss, mass_loss = self.Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
                                                                                         mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
                                                                                         reduce_loss_per_event = True
                                                                                         )
@@ -465,7 +444,7 @@ class Pipline():
                         else:
                             all_loss = torch.cat((all_loss, recon_loss.cpu().detach()))
                     else:
-                        recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss_none(recon_x, x, mu, log_var, pred_num, pred_mass, part,
+                        recon_loss, kl_divergence, num_det_loss, mass_loss = self.Loss.vae_loss_none(recon_x, x, mu, log_var, pred_num, pred_mass, part,
                                                                                         mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
                                                                                         )
                         if all_loss is None:
@@ -500,14 +479,14 @@ if __name__ == "__main__":
 
     config = 'config.yaml'
     if args.mode == 'train':
-        pipline = Pipline(config)
+        pipline = PiplineMask(config)
         print('TRAIN PIPLINE')
         pipline.train()
     elif args.mode == 'test':
-        pipline = Pipline(config, need_train_DS=False)
+        pipline = PiplineMask(config, need_train_DS=False)
         print('TEST PIPLINE')
         pipline.validation()
     elif args.mode == 'latent':
-        pipline = Pipline(config, need_train_DS=False)
+        pipline = PiplineMask(config, need_train_DS=False)
         print('Latent PIPLINE')
         pipline.predict_latent(args.write_embading)

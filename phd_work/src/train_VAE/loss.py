@@ -48,7 +48,7 @@ def CE_loss_particle(pred : torch.Tensor, real : torch.Tensor):
     # assert pred.shape = real.shape
     loss = nn.CrossEntropyLoss(reduction='none')(pred, real)
     return torch.mean(loss)
-def vae_loss(recon_x, x, mu, log_var, pred_num, pred_part, real_part, mask = -10.0, use_mask: bool = True, koef_loss: Optional[torch.Tensor] = None,
+def vae_loss(recon_x, x, mu, log_var, pred_num, recon_pred, params_CR, real_part, mask = -10.0, use_mask: bool = True, koef_loss: Optional[torch.Tensor] = None,
              reduce_loss_per_event :bool = False):
     """
     Общая функция потерь для VAE: включает MSE, KL-дивергенцию, число детекторов и классификацию массы.
@@ -92,12 +92,19 @@ def vae_loss(recon_x, x, mu, log_var, pred_num, pred_part, real_part, mask = -10
         # loss for predict num active detections
         num_det_loss = Num_Det_Loss(num_det[:,:,0].float(), pred_num)
         # loss for predict particles
-        loss_mass = CE_loss_particle(pred_part, real_part)
-        return recon_loss, kl_divergence / x.size(0), num_det_loss, loss_mass
+        if recon_pred is not None:
+            loss_recon_pred = nn.MSELoss(reduction='none')(recon_pred, params_CR.float()) #batch, params
+            loss_recon_pred = torch.mean(loss_recon_pred, dim=0) # params
+            # CE_loss_particle(pred_part, real_part)
+        else:
+            loss_recon_pred = torch.zeros(1,)
+        return recon_loss, kl_divergence / x.size(0), num_det_loss, loss_recon_pred
     else:
         # В тупую усредняем
         recon_loss = torch.mean(recon_loss) # mean by active det
-        return recon_loss, kl_divergence / x.size(0), num_det_loss, loss_mass
+
+        # HERE ERROR
+        return recon_loss, kl_divergence / x.size(0), num_det_loss, loss_recon_pred
 
 def vae_loss_none(recon_x, x, mu, log_var, pred_num, pred_part, real_part, mask = -10.0, use_mask: bool = True, koef_loss: Optional[torch.Tensor] = None):
     """

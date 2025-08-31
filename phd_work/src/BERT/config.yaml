@@ -1,12 +1,12 @@
 mode: Latent
 input_dim: 6
-hidden_dim: 128
+hidden_dim: 64
 latent_dim: 16
-num_layers: 2
-batch_size: 100
+num_layers: 6
+batch_size: 1500
 lr: 1e-4
-epoches: 100
-lstm2: False
+epoches: 200
+probability: 0.5
 reconstruction_params: 
     # mc_params (num_evs,10):
     # 0. mc_event_num
@@ -25,7 +25,8 @@ reconstruction_params:
   - 5
 #data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
-data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
+# data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
+data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_T_excl_geo_T_one_work.h5'
 #for masking in dataloader
 padding_value: -11.0
 stop_token: -10.0
@@ -41,18 +42,17 @@ paticles:
   test:
     - pr
     - photon
-
+change_coordinat: True
+change_sort: True
 koef_loss: [1,1,0,1,1,1]
-exp: AutoEncoder
+exp: BERT
 use_mask: True
-PATH: Encoder_MEAN_DecoderTransformer_ENCODER LSTM____COORDINATE_REAL
-save_model_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder
+PATH: BERT_one_work_Change_SORT
+save_model_path: /home/rfit/Telescope_Array/phd_work/Models/BERT
 show_index:
   - 10
   - 20
   - 30
 write_param:
-  # - 'hidden_dim'
   - 'paticles'
-chpt: None #/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_2Transformer_CLS/best
-# chpt: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_2Transformer_CLS/best
+chpt: None #/home/rfit/Telescope_Array/phd_work/Models/BERT/BERT_8l_0.5/last

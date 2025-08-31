@@ -2,11 +2,11 @@ import numpy as np
 import h5py as h5
 
 use_wf_16 = True
-h5_in = 'pr_photon_0001_excl_sat_F_excl_geo_F.h5'
+h5_in = 'pr_photon_0001_excl_sat_T_excl_geo_T.h5'
 h5f = '/home3/rfit/Telescope_Array/phd_work/data/bundled/' + h5_in
 num_evs = 200000
-keys_evs = ['recos','det_max_wf','det_max_params']
-keys_hits = ['dt_params','wfs_flat']
+keys_evs = ['recos','det_max_params'] # det_max_wf
+keys_hits = ['dt_params',] # wfs_flat
 
 with h5.File(h5f,'a') as hf:
     # event-wise
@@ -15,8 +15,12 @@ with h5.File(h5f,'a') as hf:
         data = hf[key][:num_evs]
         mean = np.mean( data, dtype=np.float64, axis=tuple(range(len(data.shape)-1)) )
         std = np.std( data, dtype=np.float64, axis=tuple(range(len(data.shape)-1)) )
-        hf.create_dataset('norm_param/'+key+'/mean', data=mean, dtype=np.float32 )
-        hf.create_dataset('norm_param/'+key+'/std', data=std, dtype=np.float32 )
+        try:
+            hf.create_dataset('norm_param/'+key+'/mean', data=mean, dtype=np.float32 )
+            hf.create_dataset('norm_param/'+key+'/std', data=std, dtype=np.float32 )
+
+        except Exception as e:
+            print(e)
     # detector-wise
     last_ev = hf['ev_starts'][num_evs+1]
     for key in keys_hits:
@@ -27,8 +31,12 @@ with h5.File(h5f,'a') as hf:
             dtype = np.float16
         else:
             dtype = np.float32
-        hf.create_dataset('norm_param/'+key+'/mean', data=mean, dtype=dtype )
-        hf.create_dataset('norm_param/'+key+'/std', data=std, dtype=dtype )
+        try:
+            hf.create_dataset('norm_param/'+key+'/mean', data=mean, dtype=np.float32 )
+            hf.create_dataset('norm_param/'+key+'/std', data=std, dtype=np.float32 )
+            
+        except Exception as e:
+            print(e)
     # dt bundle
     if False:
         data = hf['dt_bundle'][:num_evs]

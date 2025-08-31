@@ -7,7 +7,77 @@ from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 from tqdm import tqdm
 class VariableLengthDataset(Dataset):
-    def __init__(self, data_path:str, mode:str, mc_params:bool = False, paticles: Optional[List[str]] = None):
+    """
+    dt_bunlde (num_dets,6,6,7):
+    parameters of detectors bundle
+    0. detector x relative to shower core, 1200 m units
+    1. detector y relative to shower core, 1200 m units
+    2. detector z, 1200 m units
+    3. detector signal MIP
+    4. time of the plane front arrival, mks
+    5. time of the waveform relative to the plane front, mks
+    6. mask for trigered detectors
+
+    recos (num_evs,15):
+    0. theta
+    1. phi
+    2. S_800
+    3. E_gamma
+    4. d_border, km
+    5. chi2/ndof for joint fit
+    6. Linsley front curvature
+    7. Area-over-peak (AOP) 1200
+    8. AOP slope
+    9. S_b parameter, b=2.5 (arXiv:1104.3399, arXiv:1305.7439)
+    10. S_b parameter, b=4.0
+    11. sum of all signals in all detectors
+    12. asymmetry  of  the  summed signal  at  the  upper  and  lower layers of detectors
+    13. total number of peaks in event
+    14. number of peaks for the detector with the largest signal
+
+    ev_ids (num_evs,3):
+    0. date
+    1. time
+    2. particle id (Z for nuclei, 0 for gamma, -1 for real data)
+
+    mc_params (num_evs,10):
+    0. mc_event_num
+    1. mc_parttype (CORSIKA, 1 - gamma, 14 - proton, 5626 - Fe)
+    2. mc_corecounter, closest to core detector number
+    3. mc_E (for primaries other than photon energy is rescaled by 1/1.27, i.e. to proton FD energy scale)
+    4. mc_theta
+    5. mc_phi
+    6. mc_height_1st_inter, km
+    7. mc_xcore
+    8. mc_ycore
+    9. mc_border_distance, km 
+
+    dt_params (num_dets,6)
+    0. detector x relative to shower core, 1200 m units
+    1. detector y relative to shower core, 1200 m units
+    2. detector z, 1200 m units
+    3. detector signal MIP
+    4. time of the plane front arrival, mks
+    5. time of the waveform relative to the plane front, mks
+
+    wfs_flat (num_dets,128,2): log(1+wf), float16
+    waveforms for all detectors
+    0: upper layer signal
+    1: lower layer signal
+
+    det_max_wf and det_max_params:
+    wfs and its params for the most acive detector
+
+    ev_starts (num_evs):
+    For event number i, ev_starts[i] is the first entry in dt_<anything> related to the event, ev_starts[i+1]-1 is the last.
+    For example, dt_params[ ev_starts[10]:ev_starts[11] ] corresponds to dt_params for 10th events
+    """
+    def __init__(self, data_path:str, mode:str, mc_params:bool = False,
+                paticles: Optional[List[str]] = None,
+                reconstruction_params: Optional[List[int]] = None,
+                change_coordinat: bool = False,
+                change_sort: bool = False,
+                  ):
         """
         Args:
             data: список тензоров, где каждый тензор имеет форму (seq_len, 6)
@@ -22,6 +92,24 @@ class VariableLengthDataset(Dataset):
         self.data = data
         self.ev_starts = ev_starts
         self.mc_params = mc_params
+        self.reconstruction_params = reconstruction_params
+        if reconstruction_params is not None:
+            self.reconstruction_params = [int(i) for i in self.reconstruction_params]
+        self.change_coordinat = change_coordinat
+        self.change_sort = change_sort
+
+    def sort_tensor(self, x):
+        # Получаем индексы сортировки по первой колонке (col0)
+        _, indices_col0 = torch.sort(x[:, 0])  # Сортировка по col0
+        sorted_x_col0 = x[indices_col0]  # Сортируем весь тензор по col0
+
+        # Теперь сортируем по второй колонке (col1) с учетом уже отсортированного по col0
+        _, indices_col1 = torch.sort(sorted_x_col0[:, 1])  # Сортировка по col1
+        sorted_indices = indices_col0[indices_col1]
+
+        # Возвращаем отсортированный тензор
+        return x[sorted_indices]
+
     def __len__(self):
         return len(self.ev_starts)-1
     def preprocc_signal(self, data: np.ndarray, ch: int = 3) -> np.ndarray:
@@ -32,7 +120,21 @@ class VariableLengthDataset(Dataset):
         fn = self.ev_starts[idx + 1]
         
         mc_params = self.mc_params[idx]
-        return torch.tensor(self.data[st:fn]), torch.tensor(mc_params[1]), torch.tensor(mc_params)
+        if self.reconstruction_params:
+            params_CR = mc_params[self.reconstruction_params]
+        else:
+            # all mc params
+            params_CR = mc_params
+        x = self.data[st:fn]
+        if self.change_coordinat:
+            # 0.8027 step
+            x_left = x[..., 0].min()
+            y_top = x[..., 1].min()
+            x[..., 0] = x[..., 0] - x_left
+            x[..., 1] = x[..., 1] - y_top
+        if self.change_sort:
+            x=self.sort_tensor(x)
+        return torch.tensor(x), torch.tensor(mc_params[1]), torch.tensor(params_CR)
     def read_h5(self, data_path, mode, mc_params, paticles: Optional[List[str]] = None):
         """
         Читает .h5 файл, выбирает нужный режим и фильтрует события по частицам.
@@ -132,6 +234,8 @@ def get_params_mask(config):
             # flat min -8.798042
             # real-flat max 15.595449
             start_token = torch.tensor([0, 0, 0, -0.277908, -8.798042, 15.595449]).unsqueeze(0)
+        elif start_token == 'trainable':
+            raise ValueError("Пока решил реализовывать CLS token, отличный от страрт")
         else:
             raise ValueError(f"Unknown start_token: {start_token}")
     else:
