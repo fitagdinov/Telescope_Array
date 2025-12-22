@@ -16,9 +16,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('Using device:', device)
 import model as Model
 import train_VAE.datasets as DataSet
-from loss import MaskLoss
+from loss import MaskLoss, ClassificationLoss, EmbadingLoss
 from typing import Optional, Tuple, Union
-
+from metric import DivedeMetrics
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -29,6 +29,8 @@ import tensorboard as tb
 tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
 # from train_VAE.pipline import Pipline
 logger = logging.getLogger()
+
+from particle_classification.classification_models import TransformerClassificationModel, Simple_classifiacation_model
 class Pipline():
     """
     Обучающий и инференс-пайплайн для вариационного автокодировщика (VAE),
@@ -167,7 +169,25 @@ class PiplineMask(Pipline):
         
         super().__init__(config)
 
-        self.Loss = MaskLoss(reduction='mean')
+        self.Loss = MaskLoss(mul_sig=self.config['mul_sig'],
+                            Wall = float(self.config['Wall']),
+                            stop_token = self.config['stop_token'],
+                            padding_value = self.config['padding_value'],)
+        self.metric_loss = [
+            MaskLoss(mul_sig=False,
+                    Wall = 1.0,
+                    stop_token = self.config['stop_token'],
+                    padding_value = self.config['padding_value'],),
+            MaskLoss(mul_sig=False,
+                    Wall = 0.0,
+                    stop_token = self.config['stop_token'],
+                    padding_value = self.config['padding_value'],),
+            MaskLoss(mul_sig=True,
+                    Wall = 0.0,
+                    stop_token = self.config['stop_token'],
+                    padding_value = self.config['padding_value'],)
+                            ]
+        self.EmbadingLoss = EmbadingLoss()
         print(self.config['input_dim'],
             self.config['hidden_dim'], 
             self.config['latent_dim'],
@@ -180,13 +200,48 @@ class PiplineMask(Pipline):
                                                 num_layers=self.config['num_layers'],
                                                 padding_value=self.config['padding_value'],
                                                 start_token=self.config['start_token'],
+
+                                                used_MAE = self.config['used_MAE']
                                                 ).to(device)
+        self.load_chpt(self.config['chpt'])
         optimizer = optim.Adam(self.model.parameters(), lr=float(self.config['lr']))
         self.optimizer = optimizer
+        if self.config['train_discriminator']:
+            class_config = read_config('/home/rfit/Telescope_Array/phd_work/src/particle_classification/classification_config.yaml')
+            self.Discriminator = TransformerClassificationModel(**class_config).to(device)
+            self.Loss_discriminator = ClassificationLoss()
+            # Отдельный оптимизатор для дискриминатора
+            self.optimizer_discriminator = optim.Adam(
+                self.Discriminator.parameters(), 
+                lr=float(class_config['lr'])
+            )
+        self.Metric = DivedeMetrics(self.writer)
+        self.Encoder = Model.EncoderTransformerMask(
+                                                input_dim=self.config['input_dim'],
+                                                hidden_dim=self.config['hidden_dim'], 
+                                                latent_dim=self.config['latent_dim'],
+                                                stop_token=self.config['stop_token'],
+                                                num_layers=self.config['num_layers'],
+                                                padding_value=self.config['padding_value'],
+                                                start_token=self.config['start_token'],
+                                                ).to(device)
         pass
     
 
-    def random_mask(self, x: torch.Tensor, probability: float, mask_v: float = -11) -> torch.Tensor:
+    def random_mask(self, x: torch.Tensor, probability: float, mask_v: float = -11,
+                    mask_max_sig:bool = True) -> torch.Tensor:
+        """
+        Маскируются детекторы для задачи MAE. 
+        те что будут замаскированы равны 1, которые остаются 0
+
+        x - данные
+        probability - вероятность маскирования
+        mask_v - токен заполнения (не стоп и не старт)
+        mask_max_sig - маскировать ли макс. детект. 
+            True - работает как и все детекторы
+            False - не будет замаскирован
+        """
+        
         # рызыгрывать вероятности а не индексы. 
         device = x.device
 
@@ -197,11 +252,25 @@ class PiplineMask(Pipline):
         token_mask[torch.arange(index.size(0)), index] = False
         
         probability_tensor = torch.rand_like(x[:,:,0:1]) # batch, len, 1
+        if not(mask_max_sig):
+            # координаты максимального сигнала [B]
+            sig = x[:, :, 3]  # [B, L]
+            arg_max_sig = torch.argmax(sig, dim=1)  # [B]
+            # для каждого батча — обнуляем вероятность в arg_max_sig
+            probability_tensor[torch.arange(x.size(0)), arg_max_sig, 0] = 0.0
         probability_tensor = probability_tensor*token_mask # zero in supportive tokens
         token_mask = torch.where(probability_tensor>(1-probability), 1, 0).to(device)
         # to shape -> batch, len, 6
         token_mask = torch.repeat_interleave(token_mask, 6, dim=2).to(device).to(torch.bool)
         return token_mask
+    def run_ones(self, btch_x):
+        x = btch_x.to(device)
+        x_mask = self.random_mask(x, 
+                        probability=float(self.config['probability']), 
+                        mask_v = self.config['padding_value'],
+                        mask_max_sig = self.config['mask_max_sig']).to(device)
+        recon_x, recon_emb = self.model(x, x_mask)
+        return recon_x
 
     def train(self):
         """
@@ -209,6 +278,7 @@ class PiplineMask(Pipline):
         """
         self.loss_best = 1000
         iters = 0
+        self.validation(epoch=-1, analys=True)
         for epoch in range(self.epochs):
             self.writer.add_scalar("lr_scheduler", self.optimizer.param_groups[0]['lr'], epoch)
             self.model.train()
@@ -216,18 +286,43 @@ class PiplineMask(Pipline):
             for x, part, params_CR in pbar:
                 x = x.to(device)
                 # get mask
-                x_mask = self.random_mask(x, probability=float(self.config['probability']), mask_v = self.config['padding_value']).to(device)
+                x_mask = self.random_mask(x, 
+                        probability=float(self.config['probability']), 
+                        mask_v = self.config['padding_value'],
+                        mask_max_sig = self.config['mask_max_sig']).to(device)
                 part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                 # print(part, part.shape)
                 params_CR = params_CR.to(device) 
                 self.optimizer.zero_grad()
-                recon_x = self.model(x, x_mask)
+                recon_x, recon_emb = self.model(x, x_mask)
+                # for embading 
+                x_not_mask = self.random_mask(x, 
+                        probability=0, 
+                        mask_v = self.config['padding_value'],
+                        mask_max_sig = self.config['mask_max_sig']).to(device)
+                _, real_emb = self.model(x, x_not_mask)
                 loss = self.Loss(recon_x, x, x_mask) # part
+                loss_emb = self.EmbadingLoss(recon_emb, real_emb)
+                loss_emb = loss_emb * float(self.config['koef_emb'])
+                loss+=loss_emb
 
                 self.writer.add_scalar("train/Loss", loss, iters)
+                self.writer.add_scalar("train/loss_emb", loss_emb, iters)
                 loss.backward()
                 self.optimizer.step()
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
+                
+                if self.config['train_discriminator']:
+                    self.optimizer_discriminator.zero_grad()
+                    recon_x_mask = torch.where(x_mask, recon_x.detach(), x).to(device)
+                    recon_x_discriminator = self.Discriminator(recon_x_mask)
+                    x_discriminator = self.Discriminator(x).to(device)
+                    recon_loss_disc = self.Loss_discriminator(recon_x_discriminator, torch.zeros_like(recon_x_discriminator[:,0]).long())
+                    x_loss_disc = self.Loss_discriminator(x_discriminator, torch.ones_like(x_discriminator[:,0]).long())
+                    loss_disc = recon_loss_disc + x_loss_disc
+                    loss_disc.backward()
+                    self.optimizer_discriminator.step()
+                    self.writer.add_scalar("train/Loss_discriminator", loss_disc, iters)
                 iters += 1
             
             self.validation(epoch=epoch, analys=True)
@@ -250,28 +345,36 @@ class PiplineMask(Pipline):
         koef_KL = self.koef_KL
         koef_DL = self.koef_DL
         losses = []
-        model.eval()
+        losses_by_metric = [[] for _ in range(len(self.metric_loss))]
+        self.model.eval()
         # loss_mean = np.array([])
         # KL_loss_mean = np.array([])
         # recon_loss_mean = np.array([])
         # num_det_loss_mean = np.array([])
         for i, val_loader in enumerate(val_loaders):
             particle = self.config['paticles']['test'][i]
-            loss_final = self.validation_step(epoch=epoch, val_loader=val_loader, model=model, koef_KL=koef_KL, koef_DL=koef_DL,particle=particle)
-            losses.append(loss_final)
-        # # write in TB
+            base_loss, metric_losses_list = self.validation_step(epoch=epoch, val_loader=val_loader, model=model, koef_KL=koef_KL, koef_DL=koef_DL,particle=particle)
+            losses.append(base_loss)
+            for mi, mloss in enumerate(metric_losses_list):
+                losses_by_metric[mi].append(mloss)
+        # # write in TB (for last probability used inside step; here we only plot figures)
+        # self.Metric(losses[0], losses[1], epoch, 0.9)
+        for mi, pair in enumerate(losses_by_metric):
+            if len(pair) == 2:
+                self.Metric(pair[0], pair[1], epoch, 0.9, tag=f"loss_variant_{mi}")
+        loss_mean = losses[0].mean()
         if analys:
             if epoch>0:
-                self.scheduler.step(losses[0])
-            if losses[0]<self.loss_best:
-                self.loss_best = losses[0]
+                self.scheduler.step(loss_mean)
+            if loss_mean<self.loss_best:
+                self.loss_best = loss_mean
                 torch.save(model.state_dict(), os.path.join(self.PATH, f'best'))
             torch.save(model.state_dict(), os.path.join(self.PATH, f'last'))
 
-            print(f'Epoch {epoch + 1}, Loss: {losses[0]} loss_best {self.loss_best}')
+            print(f'Epoch {epoch + 1}, Loss: {loss_mean} loss_best {self.loss_best}')
 
     def validation_step(self, epoch: int, val_loader, model,
-                    koef_KL=1, koef_DL=1, particle=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                    koef_KL=1, koef_DL=1, particle=None) -> Tuple[np.ndarray, list]:
         """
         Одна итерация валидации по одному типу частиц.
 
@@ -287,27 +390,63 @@ class PiplineMask(Pipline):
             Кортеж numpy-массивов: полные потери, KL, реконструкция и число детекторов.
         """
 
-        probability_for_write = [0.1,0.5,0.7]
+        probability_for_write = [0.7,0.9]
         for probability in probability_for_write:
             particle = '' if particle is None else particle
-            loss_mean = []
+            loss_mean_emb = []
+            loss_mean = np.zeros((0,))
+            metric_losses = [np.zeros((0,)) for _ in range(len(self.metric_loss))]
+            loss_mean_disc = []
             pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1} in {particle}, Loss: 0.0")
             num_examples = 0
             for x, part, params_CR in pbar_val:  # x should be a batch of sequences with padding
                 num_examples += x.size(0)
                 with torch.no_grad(): # float(self.config['probability']
-                    x_mask = self.random_mask(x, probability=probability, mask_v = self.config['padding_value']).to(device)
-
+                    x_mask = self.random_mask(x, 
+                        probability=probability, 
+                        mask_v = self.config['padding_value'],
+                        mask_max_sig = self.config['mask_max_sig']).to(device)
                     x = x.to(device)
                     part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                     params_CR = params_CR.to(device)
-                    recon_x = self.model(x, x_mask)
-                    loss = self.Loss(recon_x, x, x_mask)
-                    pbar_val.set_description(f"VAL {particle} Loss: {loss.item():.4f}")
-                    loss_mean.append(loss.item())
-            loss_final = np.array(loss_mean).mean()
+                    recon_x, recon_emb = self.model(x, x_mask)
+                    x_not_mask = self.random_mask(x, 
+                        probability=0, 
+                        mask_v = self.config['padding_value'],
+                        mask_max_sig = self.config['mask_max_sig']).to(device)
+                    _, real_emb = self.model(x, x_not_mask)
+                    loss = self.Loss(recon_x, x, x_mask, reduction='none')
+                    loss_emb = self.EmbadingLoss(recon_emb, real_emb)
+                    loss_emb = loss_emb * float(self.config['koef_emb'])
+                    loss_mean_emb.append(loss_emb.cpu().detach())
+                    # loss+=loss_emb
+                    pbar_val.set_description(f"VAL {particle} Loss: {loss.mean().item():.4f}")
+                    # loss_mean.append(loss.item())
+                    loss_mean = np.concatenate((loss_mean, loss.cpu().detach().numpy()))
+                    # compute additional metric losses
+                    for mi, loss_fn in enumerate(self.metric_loss):
+                        m_loss = loss_fn(recon_x, x, x_mask, reduction='none')
+                        metric_losses[mi] = np.concatenate((metric_losses[mi], m_loss.cpu().detach().numpy()))
+                    if self.config['train_discriminator']:
+                        
+                        recon_x_mask = torch.where(x_mask, recon_x, x).to(device)
+                        recon_x_discriminator = self.Discriminator(recon_x_mask)
+                        x_discriminator = self.Discriminator(x)
+                        recon_loss_disc = self.Loss_discriminator(recon_x_discriminator, torch.zeros_like(recon_x_discriminator[:,0]).long())
+                        x_loss_disc = self.Loss_discriminator(x_discriminator, torch.ones_like(x_discriminator[:,0]).long())
+                        loss_disc = recon_loss_disc + x_loss_disc
+                        loss_mean_disc.append(loss_disc.item())
+            loss_final = loss_mean.mean()
+            loss_mean_emb = np.array(loss_mean_emb).mean()
             # write in TB
             self.writer.add_scalar(f"val/Loss/{particle}/probability={probability}", loss_final, epoch)
+            self.writer.add_scalar(f"val/LossEmb/{particle}/probability={probability}", loss_mean_emb, epoch)
+            # write additional metric losses to TB
+            for mi, arr in enumerate(metric_losses):
+                if arr.size > 0:
+                    self.writer.add_scalar(f"val/Loss_variant_{mi}/{particle}/probability={probability}", arr.mean(), epoch)
+            if self.config['train_discriminator']:
+                self.writer.add_scalar(f"val/Loss_discriminator/{particle}/probability={probability}", np.array(loss_mean_disc).mean(), epoch)
             real = x[self.show_index]
             fake = recon_x[self.show_index]
             for ii in range(len(self.show_index)):
@@ -315,8 +454,8 @@ class PiplineMask(Pipline):
                 i = -ii
                 fig = show_pred(real[i], (fake*x_mask[self.show_index])[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = -1)
                 self.writer.add_figure(f"val/show_pred_{ii}/{particle}", fig, epoch)
-        return loss_final
-
+        # divided in last probability (we return arrays from the last probability loop)
+        return loss_mean, metric_losses
     def predict_latent(self, write_embedding: bool = True, choise_num: Optional[int] = None,
                    NoneLoss: bool = False) -> Tuple[torch.Tensor, list, Union[torch.Tensor, list]]:
         """

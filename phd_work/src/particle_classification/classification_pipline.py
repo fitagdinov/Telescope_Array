@@ -57,11 +57,51 @@ class ClassificationPipline(Pipline):
         else:
             raise ValueError('Unknown model type')
         self.model.to(self.device)
-        self.Loss = ClassificationLoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters())
+        # Вычисляем веса классов для борьбы с дисбалансом
+        class_weights = self._calculate_class_weights()
+        self.Loss = ClassificationLoss(
+            num_class=len(self.config['paticles']['train']),
+            class_weights=class_weights,
+            label_smoothing=0.1,  # Добавляем label smoothing
+            weight_decay=1e-4     # Добавляем L2 регуляризацию
+        )
+        print(self.model.parameters())
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=float(self.config['lr']))
         self.best_score = -1.0
-        self.Metrics = ClassificationMetrics(TBwriter=self.writer, num_class = len(self.config['paticles']))
+        self.Metrics = ClassificationMetrics(TBwriter=None, num_class = len(self.config['paticles']))
         self.save_model_path = os.path.join(self.config['save_model_path'], self.config['PATH'])
+    
+    def _calculate_class_weights(self):
+        """Вычисляет веса классов для борьбы с дисбалансом"""
+        print("Вычисляем веса классов...")
+        
+        # Подсчитываем количество примеров каждого класса
+        class_counts = {}
+        total_samples = 0
+        
+        for x, part, _ in self.train_loader:
+            part = torch.where(part == 1, 0, 1)  # 0- photon, 1- proton
+            unique, counts = torch.unique(part, return_counts=True)
+            
+            for cls, count in zip(unique, counts):
+                cls = cls.item()
+                if cls not in class_counts:
+                    class_counts[cls] = 0
+                class_counts[cls] += count.item()
+                total_samples += count.item()
+        
+        print(f"Распределение классов: {class_counts}")
+        
+        # Вычисляем веса (обратно пропорционально частоте)
+        num_classes = len(class_counts)
+        class_weights = torch.zeros(num_classes)
+        
+        for cls, count in class_counts.items():
+            class_weights[cls] = total_samples / (num_classes * count)
+        
+        print(f"Веса классов: {class_weights}")
+        return class_weights.to(self.device)
+    
     def train(self):
         self.loss_best = 1000
         iters = 0
@@ -75,15 +115,30 @@ class ClassificationPipline(Pipline):
                 x = x.to(self.device)
                 part = torch.where(part == 1, 0, 1).to(self.device) # 0- photon, 1- proton
                 pred_mass = self.model(x)
-                loss = self.Loss(pred_mass, part)
+                loss = self.Loss(pred_mass, part, list(self.model.parameters()))
                 loss.backward()
+                
+                # Анализируем предсказания для диагностики
+                # ЗАКОМеНТИРОВАТЬ ЕСЛИ МЕШАЕТСЯ
+                with torch.no_grad():
+                    predicted_classes = torch.argmax(pred_mass, dim=1)
+                    class0_count = torch.sum(predicted_classes == 0).item()
+                    class1_count = torch.sum(predicted_classes == 1).item()
+                    confidence = torch.max(pred_mass, dim=1)[0].mean().item()
+                    
+                    if iters % 300 == 0:  # Выводим каждые 300 итераций
+                        print(f"Iter {iters}: Predicted - Class 0: {class0_count}, Class 1: {class1_count}, Avg confidence: {confidence:.3f}")
+                
                 self.optimizer.step()
                 self.writer.add_scalar("train/Loss", loss, iters)
+                self.writer.add_scalar("train/Class0_predictions", class0_count, iters)
+                self.writer.add_scalar("train/Class1_predictions", class1_count, iters)
+                self.writer.add_scalar("train/Avg_confidence", confidence, iters)
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
                 iters += 1
             
             self.validation(epoch=epoch, analys=True)
-    def validation(self, epoch, analys=True):
+    def validation(self, epoch, analys=True, return_metric=False):
         self.model.eval()
         loss_mean = []
         y_preds = None
@@ -94,7 +149,7 @@ class ClassificationPipline(Pipline):
                 x = x.to(self.device)
                 part = torch.where(part == 1, 0, 1).to(self.device) # 0- photon, 1- proton
                 pred_mass = self.model(x)
-                loss = self.Loss(pred_mass, part)
+                loss = self.Loss(pred_mass, part, list(self.model.parameters()))
                 loss_mean.append(loss.item())
                 if y_preds is None:
                     y_preds = pred_mass.detach().cpu().numpy()
@@ -102,10 +157,21 @@ class ClassificationPipline(Pipline):
                 else:
                     y_preds = np.concatenate([y_preds, pred_mass.detach().cpu().numpy()])
                     y_target = np.concatenate([y_target, part.detach().cpu().numpy()])
-        self.Metrics(y_preds, y_target, epoch)
-        if self.Metrics.score > self.best_score:
-            self.best_score = self.Metrics.score
+        # Вычисляем метрики с ROC кривой
+        metrics_results = self.Metrics(y_preds, y_target, epoch, show=True)
+        if return_metric:
+            return metrics_results
+        # Выводим ROC AUC в консоль
+        if 'roc_auc' in metrics_results:
+            print(f"ROC AUC: {metrics_results['roc_auc']:.4f}")
+        
+        # Сохраняем лучшую модель по F1 score или ROC AUC
+        current_score = metrics_results.get('roc_auc', self.Metrics.score)
+        if current_score > self.best_score:
+            self.best_score = current_score
             torch.save(self.model.state_dict(), os.path.join(self.PATH, f'best'))
+            print(f"Новая лучшая модель сохранена! ROC AUC: {current_score:.4f}")
+        
         self.writer.add_scalar("val/Loss", np.mean(loss_mean), epoch)
     def test(self, chpt:str, getting_dataloader = None):
         self.model.load(chpt)
@@ -127,8 +193,10 @@ class ClassificationPipline(Pipline):
                 else:
                     y_preds = np.concatenate([y_preds, pred_mass.detach().cpu().numpy()])
                     y_target = np.concatenate([y_target, part.detach().cpu().numpy()])
-        metric_res = self.Metrics(y_preds, y_target)
-        print(metric_res)
+        metric_res = self.Metrics(y_preds, y_target, show=True)
+        print("=== Результаты тестирования ===")
+        for metric_name, value in metric_res.items():
+            print(f"{metric_name}: {value:.4f}")
         return y_preds, y_target
 
 if __name__ == "__main__":
@@ -146,11 +214,10 @@ if __name__ == "__main__":
         pipline = ClassificationPipline(config, many_val_loaders =False)
         print('TRAIN PIPLINE')
         pipline.train()
-    # elif args.mode == 'test':
-    #     pipline = Pipline(config, need_train_DS=False)
-    #     print('TEST PIPLINE')
-    #     pipline.validation()
-    # elif args.mode == 'latent':
-    #     pipline = Pipline(config, need_train_DS=False)
-    #     print('Latent PIPLINE')
-        # pipline.predict_latent(args.write_embading)
+    elif args.mode == 'test':
+        pipline = ClassificationPipline(config, many_val_loaders =False)
+        print('TEST PIPLINE')
+        path = '/home/rfit/Telescope_Array/phd_work/Models/Classification/test_particles/One_working_V2/best'
+        pipline.model.load(path)
+        metric = pipline.validation('epoch', return_metric = True)
+        print(metric)

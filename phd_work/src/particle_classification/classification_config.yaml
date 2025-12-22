@@ -6,6 +6,8 @@ batch_size: 2000
 lr: 1e-3
 epoches: 100
 lstm2: False
+
+num_layers: 2
 #data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
 data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_T_excl_geo_T_one_work.h5'
@@ -28,12 +30,12 @@ paticles:
 koef_loss: [1,1,0,1,1,1]
 exp: lat8
 use_mask: True
-PATH: 'test_particles/One_working'
+PATH: 'test_particles/One_working_V2'
 show_index:
   - 10
   - 20
   - 30
-used_model: 'TransformerClassificationModel'
+used_model: TransformerClassificationModel
 encoder_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Proton_train_lat=8/best
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/Classification
 write_param:

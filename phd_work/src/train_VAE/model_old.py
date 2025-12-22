@@ -66,97 +66,6 @@ class Encoder(nn.Module):
         log_var = self.fc_logvar(h_n)  # логарифм дисперсии латентного пространства
         # (h_n, c_n) - различаются только shape
         return mu, log_var, (h_n, c_n)
-class Encoder_Transformer_AE(nn.Module):
-    """
-    Энкодер вариационного автокодировщика на базе Transformer.
-    За основу классификатор частиц (См. particle_classification/classification_models.py).
-
-    Аргументы:
-        input_dim (int): Размерность входных данных.
-        hidden_dim (int): Размерность скрытого состояния LSTM.
-        latent_dim (int): Размерность латентного пространства.
-        lstm2 (bool): Добавлять ли второй LSTM-слой.
-        lstm3 (bool): Добавлять ли третий LSTM-слой.
-    """
-    def __init__(self, input_dim=6, hidden_dim=64, latent_dim=16,num_layers=4, **kwargs):
-        super().__init__()
-        self.embading  = nn.Linear(input_dim,hidden_dim)
-        self.TransformerEncoderLayer = nn.TransformerEncoderLayer(d_model=hidden_dim,
-                                                                nhead = 4,
-                                                                dim_feedforward=1024,
-                                                                dropout=0.1,
-                                                                activation='relu',
-                                                                layer_norm_eps=1e-05, 
-                                                                batch_first=True, 
-                                                                norm_first=False, 
-                                                                )
-        self.TransformerEncoder = nn.TransformerEncoder(
-                                    self.TransformerEncoderLayer,
-                                    num_layers=num_layers,
-                                                        )
-        self.last_encoder = Encoder(input_dim=hidden_dim, hidden_dim=hidden_dim,
-                         latent_dim=latent_dim)
-        self.config = kwargs
-        self.fc1 = nn.Linear(hidden_dim, 32)
-        self.stop_token = kwargs['stop_token']
-        self.padding_value = kwargs['padding_value']
-        self.fc2 = nn.Linear(32, latent_dim)
-        
-        # Слои для VAE: mu и log_var
-        # self.fc_mu = nn.Linear(32, latent_dim)
-        # self.fc_logvar = nn.Linear(32, latent_dim)
-        
-        # self.softmax = nn.Softmax(dim=1)
-        self.activation = nn.LeakyReLU()
-    def get_mask(self, x, stop_token = None, padding_value = None):
-        if stop_token is None:
-            stop_token = torch.tensor(self.stop_token, dtype=torch.long, device=x.device)
-        if padding_value is None:
-            padding_value = torch.tensor(self.padding_value, dtype=torch.long, device=x.device)
-        mask = torch.zeros_like(x, dtype=torch.long)  # Убедитесь, что это long (int64)
-        mask = torch.where(x == stop_token, torch.tensor(1, dtype=torch.long, device=x.device), mask)
-        mask = torch.where(x == padding_value, torch.tensor(1, dtype=torch.long, device=x.device), mask)
-
-        # ОСОВОБОДИМ ПЕРВЫЙ ТОКЕН. ОН БУДЕТ CLS в пониманиие БЕРТ.
-        # ПО нему и будем постанавливать. Он будет агрегировать в СЕбе все
-
-        # mask[:,0,:] = 1
-        mask = mask[:,:,0] # need (batch, seq)
-
-        # unused MASK. BE  carefull
-        return mask.bool().to(x.device)
-
-
-    def forward(self,x):
-        mask = self.get_mask(x)
-        
-        x = self.embading(x)
-        x = self.TransformerEncoder(x, src_key_padding_mask= mask)
-        # Только по этой оси потому что она переменной длины
-        CLS = x[:,0,:]  
-    
-        # CLS = torch.mean(x, dim=1)
-        # print(x.shape, mask.shape)
-        # CLS = torch.sum(x*(~mask.unsqueeze(-1)), dim=1)
-        # CLS = CLS/(torch.sum(~mask, dim=1).unsqueeze(-1))
-
-        # mu, log_var, (h_n, c_n) = self.last_encoder(x)
-        # z=mu
-
-
-        # Общий слой для извлечения признаков
-        z = self.fc1(CLS)
-        z = self.activation(z)
-        
-        # Вычисляем mu и log_var для VAE
-        mu = self.fc2(z)
-        # log_var = self.fc_logvar(z)
-        
-        # для соблюдения выхода как у LSTM
-        return mu, None, (None, None)
-    def load(self, path):
-        if path is not None:
-            self.load_state_dict(torch.load(path))
 class Encoder_Transformer(nn.Module):
     """
     Энкодер вариационного автокодировщика на базе Transformer.
@@ -568,7 +477,7 @@ class DecoderTransformer(nn.Module):
         self.TransformerDecoderLayer = nn.TransformerDecoderLayer(d_model=hidden_size,
                                                                 nhead = 2,
                                                                 dim_feedforward=256,
-                                                                dropout=0.0,
+                                                                dropout=0.3,
                                                                 activation='relu',
                                                                 layer_norm_eps=1e-05, 
                                                                 batch_first=True, 
@@ -715,7 +624,7 @@ class VAE(nn.Module):
         #                         lstm2=lstm2, lstm3=lstm3, num_part=num_part)
         self.decoder = DecoderTransformer(latent_dim, hidden_dim_decoder, input_dim, start_token,
                                 lstm2=lstm2, lstm3=lstm3, num_part=num_part,
-                                num_layers=num_layers,
+                                num_layers=2,
                                 reconstruction_params=reconstruction_params)
         # self.decoder = DecoderTransformer(latent_dim, hidden_dim, input_dim, start_token, num_part=num_part)
         print("Encoder has params:", self.count_parameters(self.encoder),"Decoder has params:", self.count_parameters(self.decoder))
@@ -754,7 +663,7 @@ class VAE(nn.Module):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
     def load(self, path):
         if path is not None:
-            strict = True
+            strict = False
             print(f"load {strict} format. If it is 'FALSE' we worning" )
             self.load_state_dict(torch.load(path), strict=strict)
 

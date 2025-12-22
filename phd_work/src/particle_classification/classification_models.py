@@ -4,11 +4,12 @@ from torch import Tensor
 from typing import Optional
 import sys
 import os
+import math
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../train_VAE')))
 
-from model import Encoder
 class Simple_classifiacation_model(nn.Module):
     def __init__(self, encoder_path: Optional[str] = None, num_class: int = 2, **kwargs):
+        from model import Encoder
         super().__init__()
         self.encoder = Encoder(input_dim=kwargs['input_dim'], hidden_dim=kwargs['hidden_dim'], latent_dim=kwargs['latent_dim'])
         self.encoder_path = encoder_path
@@ -37,6 +38,22 @@ class Simple_classifiacation_model(nn.Module):
     def load(self, path):
         if path is not None:
             self.load_state_dict(torch.load(path))
+class PositionalEncoding(torch.nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        """
+        Args:
+            x: Tensor of shape (batch_size, seq_len, d_model)
+        """
+        return x + self.pe[:x.size(1), :]
 class TransformerClassificationModel(nn.Module):
     def __init__(self, encoder_path: Optional[str] = None, num_class: int = 2, **kwargs):
         super().__init__()
@@ -50,6 +67,7 @@ class TransformerClassificationModel(nn.Module):
         head = 4
         """
         self.embading  = nn.Linear(6,64)
+        self.pos_embedding = PositionalEncoding(64, max_len=100)
         self.TransformerEncoderLayer = nn.TransformerEncoderLayer(d_model=64,
                                                                 nhead = 4,
                                                                 dim_feedforward=256,
@@ -67,7 +85,8 @@ class TransformerClassificationModel(nn.Module):
         self.fc2 = nn.Linear(self.latent_class, num_class)
         self.softmax = nn.Softmax(dim=1)
         self.activation = nn.LeakyReLU()
-        self.softmax = nn.Softmax(dim=1)
+        self.dropout = nn.Dropout(0.1)
+        self.batch_norm = nn.BatchNorm1d(self.latent_class)
     def get_mask(self, x, stop_token = None, padding_value = None):
         if stop_token is None:
             stop_token = torch.tensor(self.config['stop_token'], dtype=torch.long, device=x.device)
@@ -85,13 +104,16 @@ class TransformerClassificationModel(nn.Module):
         mask = self.get_mask(x)
         
         x = self.embading(x)
+        x = self.pos_embedding(x)
         x = self.TransformerEncoder(x, src_key_padding_mask= mask)
         x = torch.mean(x, dim=1)
         z = self.fc1(x)
+        z = self.batch_norm(z)
         z = self.activation(z)
+        z = self.dropout(z)
         z = self.fc2(z)
-        x = self.softmax(x)
-        return x
+        z = self.softmax(z)
+        return z
     def load(self, path):
         if path is not None:
             self.load_state_dict(torch.load(path))
@@ -105,10 +127,10 @@ if __name__ == '__main__':
     y = torch.randint(0, 2, (64,))
     for i in range(10):
         optimizer.zero_grad()
-        y_pred, mu = model(x)
+        y_pred = model(x)
         loss = loss_fn(y_pred, y)
         loss.backward()
         optimizer.step()
-        print('y_pred\n', y_pred,'\nencoder\n', mu)
+        print('y_pred\n', y_pred)
 
 

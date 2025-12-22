@@ -3,10 +3,12 @@ input_dim: 6
 hidden_dim: 64
 latent_dim: 16
 num_layers: 6
-batch_size: 1500
-lr: 1e-4
-epoches: 200
-probability: 0.5
+batch_size: 100
+lr: 5e-5
+epoches: 300
+probability: 0.4
+used_MAE: False
+train_discriminator: False
 reconstruction_params: 
     # mc_params (num_evs,10):
     # 0. mc_event_num
@@ -28,13 +30,17 @@ reconstruction_params:
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
 data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_T_excl_geo_T_one_work.h5'
 #for masking in dataloader
-padding_value: -11.0
+padding_value: -10.0
 stop_token: -10.0
 start_token: hard_v1
 CLS_token: #trainable
 koef_KL: 0.0
 koef_DL: 0.1
 koef_mass: 0.0
+koef_emb: 0.0
+Wall: 1.0
+mul_sig: False # True - домножение на сигнал, False - нет 
+mask_max_sig: True # True - работает как и все детекторы False - не будет замаскирован
 paticles:
   train:
     - pr
@@ -42,17 +48,17 @@ paticles:
   test:
     - pr
     - photon
-change_coordinat: True
-change_sort: True
+change_coordinat: False
+change_sort: False
 koef_loss: [1,1,0,1,1,1]
 exp: BERT
 use_mask: True
-PATH: BERT_one_work_Change_SORT
+PATH: BERT_one_work_hard
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/BERT
 show_index:
-  - 10
-  - 20
-  - 30
+  - 1
+  - 2
+  - 3
 write_param:
   - 'paticles'
-chpt: None #/home/rfit/Telescope_Array/phd_work/Models/BERT/BERT_8l_0.5/last
+chpt: #/home/rfit/Telescope_Array/phd_work/Models/BERT/BERT_one_work_wall_1.0/last

@@ -86,7 +86,7 @@ def vae_loss(recon_x, x, mu, log_var, pred_num, recon_pred, params_CR, real_part
         num_det_mask = calc_det(x, mask, use_mask=use_mask)
         recon_loss*=num_det_mask
         num_det = torch.sum(num_det_mask, dim=1)[:,0][:,None, None]
-        recon_loss = torch.sum(recon_loss/num_det, dim=1) # mean by active det
+        recon_loss = torch.sum(recon_loss/num_det, dim=1).mean(dim=1) # mean by active det
         if not(reduce_loss_per_event):
             recon_loss = torch.mean(recon_loss) # mean by batch and featches
         # loss for predict num active detections

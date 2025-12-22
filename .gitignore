@@ -1,4 +1,5 @@
 */nohup.out
+*.npy
 Parameters_all/Models
 mk_all_old.h5
 Parameters_all/.ipynb_checkpoints
@@ -32,3 +33,4 @@ phd_work/src/particle_classification/test_particles/
 phd_work/TBruns
 phd_work/Models
 phd_work/src/train_VAE/hists/
+

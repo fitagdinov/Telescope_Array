@@ -2,9 +2,9 @@ mode: Latent
 input_dim: 6
 hidden_dim: 128
 latent_dim: 16
-num_layers: 2
+num_layers: 8
 batch_size: 100
-lr: 1e-4
+lr: 3e-5
 epoches: 100
 lstm2: False
 reconstruction_params: 
@@ -25,15 +25,17 @@ reconstruction_params:
   - 5
 #data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
-data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
+# data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
+data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_T_excl_geo_T_one_work.h5'
 #for masking in dataloader
 padding_value: -11.0
 stop_token: -10.0
 start_token: hard_v1
-CLS_token: #trainable
-koef_KL: 0.0
-koef_DL: 0.1
+CLS_token: trainable
+koef_KL: 0.5
+koef_DL: 0.0
 koef_mass: 0.0
+reparameterize_koef: 1.0
 paticles:
   train:
     - pr
@@ -43,16 +45,17 @@ paticles:
     - photon
 
 koef_loss: [1,1,0,1,1,1]
-exp: AutoEncoder
+split_num: 100000
+exp: AutoEncoder2
 use_mask: True
-PATH: Encoder_MEAN_DecoderTransformer_ENCODER LSTM____COORDINATE_REAL
+PATH: small_decoder_big
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder
 show_index:
-  - 10
-  - 20
-  - 30
+  - 1
+  - 2
+  - 3
 write_param:
   # - 'hidden_dim'
   - 'paticles'
-chpt: None #/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_2Transformer_CLS/best
+chpt: #'/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/small_decoder_VAE/last'
 # chpt: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_2Transformer_CLS/best
