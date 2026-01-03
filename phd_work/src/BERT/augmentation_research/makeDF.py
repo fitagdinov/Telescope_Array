@@ -88,8 +88,8 @@ class BertAugmentation():
         
 # embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_CLS FIRST_CONT_DecoderTransformer_LR305/last'
 embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/small_decoder/last'
-embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/small_decoder_VAE_V9/best'
-run_dir = '/home/rfit/Telescope_Array/phd_work/src/BERT/augmentation_research/small_decoder_VAE_V9' + MODE
+embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/variavle_KL/best'
+run_dir = '/home/rfit/Telescope_Array/phd_work/src/BERT/augmentation_research/variavle_KL' + MODE
 os.makedirs(run_dir, exist_ok=True)
 augmentation_pipline = BertAugmentation(embading_path = embading_path)
 augmentation_pipline.run(nums=8, dl_n = 0, save_dir = os.path.join(run_dir, 'proton'))

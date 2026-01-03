@@ -715,7 +715,7 @@ class VAE(nn.Module):
         #                         lstm2=lstm2, lstm3=lstm3, num_part=num_part)
         self.decoder = DecoderTransformer(latent_dim, hidden_dim_decoder, input_dim, start_token,
                                 lstm2=lstm2, lstm3=lstm3, num_part=num_part,
-                                num_layers=num_layers,
+                                num_layers=2,
                                 reconstruction_params=reconstruction_params)
         # self.decoder = DecoderTransformer(latent_dim, hidden_dim, input_dim, start_token, num_part=num_part)
         print("Encoder has params:", self.count_parameters(self.encoder),"Decoder has params:", self.count_parameters(self.decoder))

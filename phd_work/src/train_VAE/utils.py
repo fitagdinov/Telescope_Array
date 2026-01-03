@@ -1,3 +1,4 @@
+from cProfile import label
 from tqdm import tqdm
 import h5py as h5
 import numpy as np
@@ -13,7 +14,7 @@ import torch
 # import model as Model
 # import datasets as DataSet
 # import loss as Loss
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Dict, List
 import yaml
 import time
 def get_time() -> str:
@@ -134,3 +135,21 @@ def MCPAR_index2srt(ind:int):
     9: "mc_border_distance (km)"
     }
     return mc_parameters_dict[ind]
+
+def draw_logvar_mu(logvar: List[torch.Tensor], mu: List[torch.Tensor], particles:List[str]) -> plt.figure:
+    fig, axs = plt.subplots(2,1, figsize = (10,20))
+    for particle in range(len(logvar)):
+        std = mu[particle].std(axis=0)
+        mean = mu[particle].mean(axis=0)
+        axs[0].errorbar(np.arange(std.shape[0]), mean, std, label=particle)
+        std = logvar[particle].std(axis=0)
+        mean = logvar[particle].mean(axis=0)
+        axs[1].errorbar(np.arange(std.shape[0]), mean, std, label=particle)
+
+    axs[0].legend()
+    axs[1].legend()
+    axs[0].grid()
+    axs[0].set_title(f'Распределение латеного пространства {particle}' )
+    axs[1].grid()
+    axs[1].set_title(f'Распределение log-var пространства {particle}' )
+    return fig

@@ -20,7 +20,7 @@ from typing import Optional, Tuple, Union
 from torch.utils.tensorboard import SummaryWriter
 
 from metric import LatentMetric, DivedeMetrics
-from utils import get_time, get_params_str, show_pred, read_config, clean_mask, MCPAR_index2srt
+from utils import get_time, get_params_str, show_pred, read_config, clean_mask, MCPAR_index2srt, draw_logvar_mu
 import logging
 import tensorflow as tf
 import tensorboard as tb
@@ -154,7 +154,10 @@ class Pipline():
         self.epochs = config['epoches']
         self.mask = config['padding_value']
         self.show_index = config['show_index']
-        self.koef_KL = config['koef_KL']
+        self.koef_KL = np.zeros(self.epochs)
+        self.koef_KL[config['koef_KL']['num_zero']:] = np.linspace(config['koef_KL']['start'], config['koef_KL']['end'], self.epochs-config['koef_KL']['num_zero'])
+        self.koef_KL = torch.tensor(self.koef_KL).to(device)
+        print('self.koef_KL', self.koef_KL)
         self.koef_DL = config['koef_DL']
         self.koef_mass = config['koef_mass']
 
@@ -172,12 +175,13 @@ class Pipline():
         """
         self.loss_best = 1000
         iters = 0
-        self.validation(epoch=-1, analys=True)
+        self.validation(epoch=0, analys=True)
         for epoch in range(self.epochs):
             print('lr_scheduler', self.optimizer.param_groups[0]['lr'])
             self.writer.add_scalar("lr_scheduler", self.optimizer.param_groups[0]['lr'], epoch)
             self.model.train()
             pbar = tqdm(self.train_loader, desc =f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: 0.0")
+            koef_KL = self.koef_KL[epoch]
             for x, part, params_CR in pbar:  # x должен быть пакетом последовательностей с заполнением
                 # x- data
                 # part - promt mc_params in h5(look dataset.py)
@@ -199,7 +203,7 @@ class Pipline():
 
                                                                                     )
                 num_det_loss *= self.koef_DL
-                kl_divergence *= self.koef_KL
+                kl_divergence *= koef_KL
                 recon_params_loss *= self.koef_mass
                 loss = recon_loss + kl_divergence + num_det_loss + torch.mean(recon_params_loss)
                 self.writer.add_scalar("train/Loss", loss, iters)
@@ -215,9 +219,10 @@ class Pipline():
                 self.optimizer_decoder.step()
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
                 iters += 1
-            
-            self.validation(epoch=epoch, analys=True)
-    def validation(self, epoch: Optional[int] = None, analys:bool=False) -> None:
+            self.writer.add_scalar("train/koef_KL", koef_KL, epoch)
+            self.validation(epoch=epoch, analys=True, koef_KL=koef_KL)
+
+    def validation(self, epoch: Optional[int] = None, analys:bool=False, koef_KL: Optional[torch.Tensor] = None) -> None:
         """
         Performs validation on the model using the validation dataset.
 
@@ -233,7 +238,7 @@ class Pipline():
         epoch = epoch if epoch is not None else -1
         model = self.model
         val_loaders = self.val_loaders
-        koef_KL = self.koef_KL
+        koef_KL = koef_KL if koef_KL is not None else self.koef_KL[epoch]
         koef_DL = self.koef_DL
 
         model.eval()
@@ -244,9 +249,18 @@ class Pipline():
         embading_dict = {}
         recon_loss_dict = {}
         KL_loss_dict = {}
+        preds_log_var_dict = {}
+        num_det_list = {}
         for i, val_loader in enumerate(val_loaders):
             particle = self.config['paticles']['test'][i]
-            loss, KL, recon, num_det, embading = self.validation_step(epoch=epoch, val_loader=val_loader, model=model, koef_KL=koef_KL, koef_DL=koef_DL,particle=particle)
+            loss, KL, recon, num_det, embading, preds_log_var, preds_num_det = self.validation_step(epoch=epoch, 
+                                                                    val_loader=val_loader, 
+                                                                    model=model,
+                                                                    koef_KL=koef_KL, 
+                                                                    koef_DL=koef_DL,
+                                                                    particle=particle,
+                                                                    reduce_loss_per_event=True,
+                                                                    return_log_var_and_num_det=True)
             loss_mean = np.concatenate((loss_mean, loss))
             KL_loss_mean = np.concatenate((KL_loss_mean, KL))
             recon_loss_mean = np.concatenate((recon_loss_mean, recon))
@@ -255,12 +269,26 @@ class Pipline():
             recon_loss_dict[particle] = recon
             KL_loss_dict[particle] = KL
             embading_dict[particle] = embading
+            preds_log_var_dict[particle] = preds_log_var
             loss_final = loss_mean.mean()
+            print(preds_log_var.shape, embading.shape,recon.shape, KL.shape)
+            self.writer.add_scalar(f"val/Loss/all/{particle}", loss.mean(), epoch)
+            self.writer.add_scalar(f"val/KL_loss/all/{particle}", KL.mean(), epoch)
+            self.writer.add_scalar(f"val/recon_loss/all/{particle}", recon.mean(), epoch)
+            self.writer.add_scalar(f"val/num_det_loss/all", num_det.mean(), epoch)
+
+            #draw logvar and mu
+        fig = draw_logvar_mu(list(preds_log_var_dict.values()), 
+                            list(embading_dict.values()), 
+                            list(preds_log_var_dict.keys()))
+        self.writer.add_figure(f"val/logvar_mu", fig, epoch)
+
+        
         # write in TB
-        self.writer.add_scalar("val/Loss/all", loss_final, epoch)
-        self.writer.add_scalar("val/KL_loss/all", KL_loss_mean.mean(), epoch)
-        self.writer.add_scalar("val/recon_loss/all", recon_loss_mean.mean(), epoch)
-        self.writer.add_scalar("val/num_det_loss/all", num_det_loss_mean.mean(), epoch)
+        # self.writer.add_scalar("val/Loss/all", loss_final, epoch)
+        # self.writer.add_scalar("val/KL_loss/all", KL_loss_mean.mean(), epoch)
+        # self.writer.add_scalar("val/recon_loss/all", recon_loss_mean.mean(), epoch)
+        # self.writer.add_scalar("val/num_det_loss/all", num_det_loss_mean.mean(), epoch)
         metric_f1, fig= self.metric_lattent(embading_dict['pr'], embading_dict['photon'])
         _, fig_divide = self.metric_divide(recon_loss_dict['pr'], recon_loss_dict['photon'], KL_loss_dict['pr'], KL_loss_dict['photon'])
         self.writer.add_figure("val/lattent", fig, epoch)
@@ -278,7 +306,10 @@ class Pipline():
             print(f'Epoch {epoch + 1}, Loss: {loss_final} metric_f1 {self.metric_f1_best}')
 
     def validation_step(self, epoch: int, val_loader, model,
-                    koef_KL=1, koef_DL=1, particle=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                    koef_KL=1, koef_DL=1, particle=None,
+                    reduce_loss_per_event:bool = False, 
+                    return_log_var_and_num_det:bool = False,
+                    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Одна итерация валидации по одному типу частиц.
 
@@ -302,6 +333,8 @@ class Pipline():
         embading = np.zeros((0, self.config['latent_dim']))
         pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1} in {particle}, Loss: 0.0")
         num_examples = 0
+        preds_log_var = np.zeros((0,self.config['latent_dim']))
+        preds_num_det = np.zeros((0, 1))
         for x, part, params_CR in pbar_val:  # x should be a batch of sequences with padding
             num_examples += x.size(0)
 
@@ -316,34 +349,39 @@ class Pipline():
                                                                                         part,
                                                                                         mask=self.mask,
                                                                                         use_mask=self.use_mask,
-                                                                                        koef_loss=self.koef_loss
+                                                                                        koef_loss=self.koef_loss,
+                                                                                        reduce_loss_per_event=reduce_loss_per_event
 
                                                                                         )
                 embading = np.concatenate((embading, mu.cpu().detach().numpy()), axis=0)
+                preds_log_var = np.concatenate((preds_log_var, log_var.cpu().detach().numpy()), axis=0)
+                preds_num_det = np.concatenate((preds_num_det, pred_num.cpu().detach().numpy()), axis=0)
+                
                 # kl_divergence *= koef_KL
                 # num_det_loss *= koef_DL
                 # recon_params_loss *= self.koef_mass
-                loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + torch.mean(recon_params_loss)*self.koef_mass
-                loss_mean.append(loss.item())
-                KL_loss_mean.append(kl_divergence.item())
-                recon_loss_mean.append(recon_loss.to('cpu').item())
-                num_det_loss_mean.append(num_det_loss.item())
-                for i,par in enumerate(recon_params_loss_mean): 
-                    recon_params_loss_mean[i] += recon_params_loss[i].to('cpu').item()
-                pbar_val.set_description(f"VAL Epoch {epoch + 1} in {particle}, Loss: {loss.item():.4f}")
-        # recon_params_loss_mean = torch.concat(recon_params_loss_mean, dim=1).numpy()
-        recon_params_loss_mean = np.array(recon_params_loss_mean)/num_examples
-        loss_final = np.array(loss_mean).mean()
-        # write in TB
-        self.writer.add_scalar(f"val/Loss/{particle}", loss_final, epoch)
-        self.writer.add_scalar(f"val/KL_loss/{particle}", np.array(KL_loss_mean).mean(), epoch)
-        self.writer.add_scalar(f"val/recon_loss/{particle}", np.array(recon_loss_mean).mean(), epoch)
-        self.writer.add_scalar(f"val/num_det_loss/{particle}", np.array(num_det_loss_mean).mean(), epoch)
-        if self.config['reconstruction_params'] is not None:
-            for i, ind in enumerate(self.config['reconstruction_params']):
-                name_param = MCPAR_index2srt(ind)
-                self.writer.add_scalar(f"val/{name_param}/{particle}", recon_params_loss_mean[i].mean(), epoch)
-
+                if reduce_loss_per_event:
+                    recon_loss_mean.append(recon_loss.to('cpu').numpy())
+                    KL_loss_mean.append(kl_divergence.to('cpu').numpy())
+                    num_det_loss_mean.append(num_det_loss.to('cpu').numpy())
+                    # Вычисляем общий loss для каждого события
+                    if len(recon_params_loss.shape) == 1:
+                        # recon_params_loss уже (batch,)
+                        total_loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + recon_params_loss*self.koef_mass
+                    else:
+                        # recon_params_loss (batch, params), усредняем по params
+                        recon_params_loss_mean_per_event = torch.mean(recon_params_loss, dim=1)  # (batch,)
+                        total_loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + recon_params_loss_mean_per_event*self.koef_mass
+                    loss_mean.append(total_loss.to('cpu').numpy())
+                else:
+                    loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + torch.mean(recon_params_loss)*self.koef_mass
+                    loss_mean.append(loss.item())
+                    KL_loss_mean.append(kl_divergence.item())
+                    recon_loss_mean.append(recon_loss.to('cpu').item())
+                    num_det_loss_mean.append(num_det_loss.item())
+                    for i,par in enumerate(recon_params_loss_mean): 
+                        recon_params_loss_mean[i] += recon_params_loss[i].to('cpu').item()
+                pbar_val.set_description(f"VAL Epoch {epoch + 1} in {particle}")
         #show from last batch
         real = x[self.show_index]
         print(recon_x.shape)
@@ -354,8 +392,39 @@ class Pipline():
             i = -ii
             fig = show_pred(real[i], fake[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = num[i])
             self.writer.add_figure(f"val/show_pred_{ii}/{particle}", fig, epoch)
-        return np.array(loss_mean), np.array(KL_loss_mean), np.array(recon_loss_mean), np.array(num_det_loss_mean), embading
-    
+        
+        if reduce_loss_per_event:
+            # Конкатенируем все батчи в один массив для каждого события
+            loss_mean = np.concatenate(loss_mean) if len(loss_mean) > 0 else np.array([])
+            recon_loss_mean = np.concatenate(recon_loss_mean) if len(recon_loss_mean) > 0 else np.array([])
+            KL_loss_mean = np.concatenate(KL_loss_mean) if len(KL_loss_mean) > 0 else np.array([])
+            num_det_loss_mean = np.concatenate(num_det_loss_mean) if len(num_det_loss_mean) > 0 else np.array([])
+            if return_log_var_and_num_det:
+                return loss_mean, KL_loss_mean, recon_loss_mean, num_det_loss_mean, embading, preds_log_var, preds_num_det
+            else:
+                return loss_mean, KL_loss_mean, recon_loss_mean, num_det_loss_mean, embading
+        # recon_params_loss_mean = torch.concat(recon_params_loss_mean, dim=1).numpy()
+        # recon_params_loss_mean = np.array(recon_params_loss_mean)/num_examples
+        # loss_final = np.array(loss_mean).mean()
+        # # write in TB
+        # self.writer.add_scalar(f"val/Loss/{particle}", loss_final, epoch)
+        # self.writer.add_scalar(f"val/KL_loss/{particle}", np.array(KL_loss_mean).mean(), epoch)
+        # self.writer.add_scalar(f"val/recon_loss/{particle}", np.array(recon_loss_mean).mean(), epoch)
+        # self.writer.add_scalar(f"val/num_det_loss/{particle}", np.array(num_det_loss_mean).mean(), epoch)
+        # if self.config['reconstruction_params'] is not None:
+        #     for i, ind in enumerate(self.config['reconstruction_params']):
+        #         name_param = MCPAR_index2srt(ind)
+        #         self.writer.add_scalar(f"val/{name_param}/{particle}", recon_params_loss_mean[i].mean(), epoch)
+
+        # return np.array(loss_mean), np.array(KL_loss_mean), np.array(recon_loss_mean), np.array(num_det_loss_mean), embading
+    def get_num_det_list(self, val_loader):
+        num_det_list = np.array([])
+        for x, part, _ in val_loader:
+            x = x.to(device)
+            num_det = Loss.calc_det(x,self.mask,use_mask=False).to('cpu').detach().numpy()
+            # return array like [7 7 7 7 7 7] - теперь num_det уже имеет форму (batch,)
+            num_det_list = np.concatenate((num_det_list, num_det))
+        return num_det_list
 
     def predict_latent(self, write_embedding: bool = True, choise_num: Optional[int] = None,
                    NoneLoss: bool = False) -> Tuple[torch.Tensor, list, Union[torch.Tensor, list]]:
@@ -430,25 +499,60 @@ class Pipline():
             # logger.log_exception(e)
             print(e)
         return latent_list, particles, all_loss#params
-    def select_random_ordered(self, latent_list, particles, all_loss, m):
-        n = len(particles)
-        assert n == latent_list.shape[0], "Размеры данных не совпадают"
-        assert m <= n, "m не может превышать n"
+    def test(self, model_path: str = None):
+        """
+        Тестируем модель. Смотрим на разделение частиц по функции ошибок
 
-        # Генерация случайных индексов без повторений
-        indices = np.random.choice(n, size=m, replace=False)
-        
-        # Сортировка индексов для сохранения порядка
-        sorted_indices = np.sort(indices)
-        
-        # Выборка данных
-        selected_latent = latent_list[sorted_indices]
-        selected_particles = [particles[i] for i in sorted_indices]
-        try:
-            all_loss = all_loss[sorted_indices]
-        except:
-            all_loss = [all_loss[i] for i in sorted_indices]
-        return selected_latent, selected_particles, all_loss
+        1 - строим графики в зависимости от кол-ва детекторов в событии
+        2 - записываем латеные представления, ошики и кол-во детекторов в событии в csv файл
+        """
+        path_save = '/home/rfit/Telescope_Array/phd_work/src/train_VAE/runs_tests'
+        model = self.model
+        if model_path is not None:
+            model.load(model_path)
+        val_loaders = self.val_loaders
+        koef_KL = self.koef_KL
+        koef_DL = self.koef_DL
+
+        model.eval()
+        loss_mean = np.array([])
+        KL_loss_mean = np.array([])
+        recon_loss_mean = np.array([])
+        num_det_loss_mean = np.array([])
+        embading_dict = {}
+        recon_loss_dict = {}
+        KL_loss_dict = {}
+        num_det_dict = {}
+        for i, val_loader in enumerate(val_loaders):
+            particle = self.config['paticles']['test'][i]
+            path = os.path.join(path_save, particle)
+            os.makedirs(path, exist_ok=True)
+            num_det_list = np.array(self.get_num_det_list(val_loader))
+            num_det_dict[particle] = num_det_list
+            loss, KL, recon, loss_num_det_pred, embading, preds_log_var, preds_num_det = self.validation_step(epoch=0, val_loader=val_loader, 
+                                                                    model=model,
+                                                                    koef_KL=koef_KL, 
+                                                                    koef_DL=koef_DL,
+                                                                    particle=particle,
+                                                                    reduce_loss_per_event=True,
+                                                                    return_log_var_and_num_det=True)
+            print(recon.shape, KL.shape, loss_num_det_pred.shape)
+            loss_mean = np.concatenate((loss_mean, loss))
+            KL_loss_mean = np.concatenate((KL_loss_mean, KL))
+            recon_loss_mean = np.concatenate((recon_loss_mean, recon))
+            num_det_loss_mean = np.concatenate((num_det_loss_mean, loss_num_det_pred))
+            # все что выше можно потом убрать 
+            recon_loss_dict[particle] = recon
+            KL_loss_dict[particle] = KL
+            embading_dict[particle] = embading
+            loss_final = loss_mean.mean()
+            print(path)
+            np.save(os.path.join(path, f'num_det.npy'), num_det_list)
+            np.save(os.path.join(path, f'recon_loss.npy'), np.array(recon_loss_dict[particle]))
+            np.save(os.path.join(path, f'embading.npy'), np.array(embading))
+            np.save(os.path.join(path, f'loss_num_det.npy'), np.array(loss_num_det_pred))
+            np.save(os.path.join(path, f'preds_log_var.npy'), np.array(preds_log_var))
+            np.save(os.path.join(path, f'preds_num_det.npy'), np.array(preds_num_det))
     def predict(self, NoneLoss):
         """
         Предсказывает латентные представления и реконструкции.
@@ -525,7 +629,7 @@ if __name__ == "__main__":
     elif args.mode == 'test':
         pipline = Pipline(config, need_train_DS=False)
         print('TEST PIPLINE')
-        pipline.validation()
+        pipline.test(model_path='/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/small_decoder_VAE_KL0/best')
     elif args.mode == 'latent':
         pipline = Pipline(config, need_train_DS=False)
         print('Latent PIPLINE')

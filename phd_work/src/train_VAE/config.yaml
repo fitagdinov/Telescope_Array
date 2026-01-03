@@ -2,10 +2,10 @@ mode: Latent
 input_dim: 6
 hidden_dim: 128
 latent_dim: 16
-num_layers: 8
+num_layers: 4
 batch_size: 100
 lr: 3e-5
-epoches: 100
+epoches: 30
 lstm2: False
 reconstruction_params: 
     # mc_params (num_evs,10):
@@ -32,8 +32,11 @@ padding_value: -11.0
 stop_token: -10.0
 start_token: hard_v1
 CLS_token: trainable
-koef_KL: 0.5
-koef_DL: 0.0
+koef_KL:
+  start: 0.0001
+  end: 0.05
+  num_zero: 0
+koef_DL: 0.1
 koef_mass: 0.0
 reparameterize_koef: 1.0
 paticles:
@@ -46,9 +49,9 @@ paticles:
 
 koef_loss: [1,1,0,1,1,1]
 split_num: 100000
-exp: AutoEncoder2
+exp: AutoEncoder3
 use_mask: True
-PATH: small_decoder_big
+PATH: variavle_KL_cont2
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder
 show_index:
   - 1
@@ -57,5 +60,5 @@ show_index:
 write_param:
   # - 'hidden_dim'
   - 'paticles'
-chpt: #'/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/small_decoder_VAE/last'
+chpt: '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/variavle_KL/last'
 # chpt: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_2Transformer_CLS/best
