@@ -264,13 +264,28 @@ class PiplineMask(Pipline):
         token_mask = torch.repeat_interleave(token_mask, 6, dim=2).to(device).to(torch.bool)
         return token_mask
     def run_ones(self, btch_x):
+        """
+        На место немаскированных данных вставляется данные из оригинального сигнала
+        """
         x = btch_x.to(device)
         x_mask = self.random_mask(x, 
                         probability=float(self.config['probability']), 
                         mask_v = self.config['padding_value'],
                         mask_max_sig = self.config['mask_max_sig']).to(device)
         recon_x, recon_emb = self.model(x, x_mask)
-        return recon_x
+        recon_x = torch.where(x_mask, recon_x, x)
+        return recon_x, x_mask
+    def run_ones_without_remask(self, btch_x):
+        """
+        Выдаются только результат BERT. В том числе и на месте немаскированных данных.
+        """
+        x = btch_x.to(device)
+        x_mask = self.random_mask(x, 
+                        probability=float(self.config['probability']), 
+                        mask_v = self.config['padding_value'],
+                        mask_max_sig = self.config['mask_max_sig']).to(device)
+        recon_x, recon_emb = self.model(x, x_mask)
+        return recon_x, x_mask
 
     def train(self):
         """

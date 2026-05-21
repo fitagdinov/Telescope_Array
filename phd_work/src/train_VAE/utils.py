@@ -141,10 +141,10 @@ def draw_logvar_mu(logvar: List[torch.Tensor], mu: List[torch.Tensor], particles
     for particle in range(len(logvar)):
         std = mu[particle].std(axis=0)
         mean = mu[particle].mean(axis=0)
-        axs[0].errorbar(np.arange(std.shape[0]), mean, std, label=particle)
+        axs[0].errorbar(np.arange(std.shape[0]), mean, std, label=particle, capsize=7)
         std = logvar[particle].std(axis=0)
         mean = logvar[particle].mean(axis=0)
-        axs[1].errorbar(np.arange(std.shape[0]), mean, std, label=particle)
+        axs[1].errorbar(np.arange(std.shape[0]), mean, std, label=particle, capsize=7)
 
     axs[0].legend()
     axs[1].legend()

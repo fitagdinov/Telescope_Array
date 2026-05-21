@@ -77,7 +77,7 @@ def validation_step(self, epoch: int, val_loader, model,
     kl_all = np.zeros((0))
     pbar_val = tqdm(val_loader, desc =f"VAL ")
     num_examples = 0
-    for x, part, params_CR in pbar_val:  # x should be a batch of sequences with padding
+    for x, part, params_CR, *_ in pbar_val:  # x should be a batch of sequences with padding
         num_examples += x.size(0)
 
         with torch.no_grad():

@@ -1,3 +1,4 @@
+from numba.cuda.simulator.kernel import Dim3
 import umap.umap_ as umap
 import numpy as np
 from typing import Optional, List
@@ -46,23 +47,28 @@ class LatentMetric():
         ax.grid(True, alpha=0.3)
         return ax
     def umap_fig(self, proton_st: np.array, photon_st: np.array, ax2=None):# List[plt.Axes, plt.Axes]
-        all_st= np.concatenate([proton_st, photon_st], axis=0) 
-        lable = np.array([0]*len(proton_st) + [1]*len(photon_st))
+        dim = proton_st.shape[-1]
+        gaus_dist = np.random.randn(1000, dim)
+        all_st= np.concatenate([proton_st, photon_st, gaus_dist], axis=0)
         reducer = umap.UMAP()
         manifold = reducer.fit(all_st)
         X_pr = manifold.transform(proton_st)
         X_ph = manifold.transform(photon_st)
-        X_reduced = manifold.transform(all_st)
-        names = ['proton', 'photon']
+        X_gaus = manifold.transform(gaus_dist)
+        names = ['proton', 'photon', 'normal']
         # ax.scatter(X_reduced[:, 0], X_reduced[:, 1], c=lable, cmap='viridis', alpha=0.7, label=names)
         # ax.legend()
         if not(ax2 is None):
             ax_1,ax_2  = ax2
             ax_1.scatter(X_pr[:, 0], X_pr[:, 1], s=0.5, alpha=0.3, label=names[0])
+            ax_1.scatter(X_gaus[:, 0], X_gaus[:, 1],c='green', s=0.5, alpha=0.3, label=names[2])
             ax_2.scatter(X_ph[:, 0], X_ph[:, 1], s=0.5, alpha=0.3, label=names[1])
+            ax_2.scatter(X_gaus[:, 0], X_gaus[:, 1],c='green', s=0.5, alpha=0.3, label=names[2])
             ax2 = (ax_1,ax_2)
             ax_1.legend()
             ax_2.legend()
+            ax_1.set_title(names[0])
+            ax_2.set_title(names[1])
 
         return ax2
     def calc_classification_metric(self, proton_st: np.array, photon_st: np.array, ax: plt.Axes):
@@ -110,7 +116,7 @@ class LatentMetric():
     def __call__(self, proton_st: np.array, photon_st: np.array) -> tuple[float, plt.Figure, plt.Axes]:
         if self.num_split is not None:
             np.random.seed(42)
-            index = np.random.random_integers(0, len(photon_st)-1, int(self.num_split), )
+            index = np.random.random_integers(0, int(1e4), int(self.num_split), )
             print(index)
             proton_st = proton_st[index]
             photon_st = photon_st[index]
@@ -167,40 +173,6 @@ class DivedeMetrics():
         ax.legend(loc="lower right")
         ax.grid(True, alpha=0.3)
         return ax
-    # def plot_tpr_vs_fpr(self, loss_pr, loss_ph, ax, title: Optional[str] = None):
-    #     """
-    #     Строит графики TPR и FPR как функции порога (threshold по loss).
-
-    #     Args:
-    #         loss_pr: массив значений loss для класса proton (метка 0)
-    #         loss_ph: массив значений loss для класса photon (метка 1)
-    #         ax: matplotlib Axes
-    #     """
-    #     # метки и значения
-    #     label_pr = np.zeros_like(loss_pr)
-    #     label_ph = np.ones_like(loss_ph)
-    #     y_true = np.concatenate((label_pr, label_ph))
-    #     y_score = np.concatenate((loss_pr, loss_ph))
-
-    #     # roc_curve вернёт fpr, tpr и thresholds
-    #     fpr, tpr, thresholds = roc_curve(y_true, y_score)
-    #     len_ph = label_ph.shape[0]
-    #     len_pr = label_pr.shape[0]
-    #     fp = fpr * len_pr
-    #     tp = tpr * len_ph
-    #     # Рисуем кривые
-    #     ax.plot(thresholds, np.log10(tpr) - np.log10(fpr), color="green", lw=2, label="TPR/FPR vs threshold")
-
-    #     ax.set_xlabel("Threshold (loss)")
-    #     ax.set_ylabel("log10(TPR/FPR) Rate")
-    #     if title is not None:
-    #         ax.set_title(title)
-    #     else:
-    #         ax.set_title("TPR/FPR as functions of threshold")
-    #     ax.legend(loc="best")
-    #     ax.grid(True, alpha=0.3)
-
-    #     return ax
     def plot_tpr_fpr_vs_threshold(self, loss_pr, loss_ph, ax, title: Optional[str] = None):
         """
         Строит графики TPR и FPR как функции порога (threshold по loss).
@@ -235,21 +207,34 @@ class DivedeMetrics():
         return ax
     def __call__(self, loss_pr, loss_ph,
                 loss_pr_KL, loss_ph_KL,
+                proton_st: np.array, photon_st: np.array,
                 ):
         if self.num_split is not None:
             np.random.seed(42)
-            index = np.random.random_integers(0, len(loss_ph)-1, int(self.num_split), )
-            print(index)
+            index = np.random.random_integers(0, int(1e4), int(self.num_split), )
             loss_pr = loss_pr[index]
             loss_ph = loss_ph[index]
             loss_pr_KL = loss_pr_KL[index]
             loss_ph_KL = loss_ph_KL[index]
+            proton_st = proton_st[index]
+            photon_st = photon_st[index]
+
         fig, axs = plt.subplots(2,2,figsize = (12,12))
         axs[0,0] = self.plot_roc_curve(loss_pr, loss_ph, axs[0,0], title="Reconstruction")
-        axs[0,1] = self.plot_roc_curve(loss_pr_KL, loss_ph_KL, axs[0,1], title="KL")
+
+        rad_pr = np.sqrt(np.sum(proton_st**2, axis=1))
+        rad_ph = np.sqrt(np.sum(photon_st**2, axis=1))
+        axs[0,1] = self.plot_roc_curve(rad_pr, rad_ph, axs[0,1], title="KL")
 
         axs[1,0] = self.plot_tpr_fpr_vs_threshold(loss_pr, loss_ph, axs[1,0], title="Reconstruction")
-        axs[1,1] = self.plot_tpr_fpr_vs_threshold(loss_pr_KL, loss_ph_KL, axs[1,1], title="KL")
+
+        # TODO in function
+        axs[1,1].hist(rad_pr, label='proton', histtype = 'step',  log=True, density =True)
+        axs[1,1].hist(rad_ph, label='photon', histtype = 'step',  log=True, density =True)
+        axs[1,1].legend()
+        axs[1,1].set_title("Radius hist")
+        axs[1,1].set_xlabel('radius')
+        axs[1,1].set_ylabel('log(num)')
 
         return None,fig
 if __name__ == "__main__":

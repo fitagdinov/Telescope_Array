@@ -1,8 +1,8 @@
 mode: Latent
-input_dim: 6
+input_dim: 14
 hidden_dim: 512
 latent_dim: 8
-batch_size: 2000
+batch_size: 3000
 lr: 1e-3
 epoches: 100
 lstm2: False
@@ -15,9 +15,15 @@ data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl
 padding_value: -11.0
 stop_token: -10.0
 start_token: hard_v1
-koef_KL: 0.0
-koef_DL: 0.1
-koef_mass: 0.1
+
+koef_MMD: 0.05 # best 0.05
+koef_KL:
+  start: 0.01
+  end: 0.01
+  start_it: 1
+  end_it: 21
+koef_DL: 0.0
+koef_mass: 0.0
 paticles:
   train:
     - pr
@@ -25,27 +31,36 @@ paticles:
   test:
     - pr
     - photon
+  # изначальный датасет фотонов в 2 раза примерно ниже протонного 
+  # т.е. чтобы было фотонов в 10 раз меньше train_probability для них 0.2
+  train_probability:
+    - 1.0
+    - 1.0
 
 
+reparameterize_koef: 1.0
+split_num: 10000
 koef_loss: [1,1,0,1,1,1]
-exp: lat8
+exp: VAE_add_lattent_2
 use_mask: True
-PATH: 'test_particles/One_working_V2'
+denoise_koef: 0.0
+PATH: 'latent+recos'
 show_index:
   - 10
   - 20
   - 30
-used_model: TransformerClassificationModel
+used_model: FullyConnectedClassificationModel #TransformerClassificationModel
 encoder_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Proton_train_lat=8/best
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/Classification
 write_param:
   - 'latent_dim'
   # - 'hidden_dim'
   - 'paticles'
-chpt: None
+chpt: None #/home/rfit/Telescope_Array/phd_work/Models/Classification/test_particles/VAE_add_lattent/best
 # chpt: /home/rfit/Telescope_Array/phd_work/src/train_VAE/test_particles/Pr_latent_64latent_dim=64;_paticles=['pr'];_/best
 
-
+change_coordinat: False
+change_sort: False
 reconstruction_params: 
     # mc_params (num_evs,10):
     # 0. mc_event_num

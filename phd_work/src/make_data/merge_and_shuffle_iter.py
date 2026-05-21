@@ -18,11 +18,11 @@ print(logger, __name__)
 logger.info(os.listdir(MC_dir_path))
 h5dir = '/home3/rfit/Telescope_Array/phd_work/data/merged/'
 os.makedirs(h5dir, exist_ok=True)
-h5_out = '_'.join(ps) + '_0001_excl_sat_T_excl_geo_T.h5' #+ms+es
+h5_out = '_'.join(ps) + '_0001_excl_sat_T_excl_geo_T_plus_bdt_params.h5' #+ms+es
 h5_out = os.path.join(h5dir, h5_out)
 write_step = 500000
 print('IN', h5s, "OUT ", h5_out)
-keys_to_pull = ['ev_ids','reco_rubtsov','reco_rubtsov_params','mc_params','dt_params','dt_ids', 'dt_mask'] #bdt_params  dt_wfs
+keys_to_pull = ['ev_ids','reco_rubtsov','reco_rubtsov_params','mc_params','dt_params','dt_ids', 'dt_mask', 'bdt_params'] #bdt_params  dt_wfs
 keys_to_pull += ['reco_ivanov','reco_ivanov_params']
 
 # get nums evs

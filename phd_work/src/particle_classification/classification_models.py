@@ -54,6 +54,29 @@ class PositionalEncoding(torch.nn.Module):
             x: Tensor of shape (batch_size, seq_len, d_model)
         """
         return x + self.pe[:x.size(1), :]
+class FullyConnectedClassificationModel(nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int = 512, num_class: int = 2, **kwargs):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, 64)
+        self.fc3 = nn.Linear(64, num_class)
+        self.softmax = nn.Softmax(dim=1)
+        self.activation = nn.LeakyReLU()
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.activation(x)
+        x = self.fc2(x)
+        x = self.activation(x)
+        x = self.fc3(x)
+        x = self.softmax(x)
+        return x
+    def load(self, path):
+        if path is not None:
+            self.load_state_dict(torch.load(path))
+class CatBoostClassificationModel(nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int = 512, num_class: int = 2, **kwargs):
+        super().__init__()
+        import catboost
 class TransformerClassificationModel(nn.Module):
     def __init__(self, encoder_path: Optional[str] = None, num_class: int = 2, **kwargs):
         super().__init__()
@@ -66,7 +89,8 @@ class TransformerClassificationModel(nn.Module):
         dff = 256
         head = 4
         """
-        self.embading  = nn.Linear(6,64)
+        input_dim = kwargs.get('input_dim', 6)
+        self.embading  = nn.Linear(input_dim, 64)
         self.pos_embedding = PositionalEncoding(64, max_len=100)
         self.TransformerEncoderLayer = nn.TransformerEncoderLayer(d_model=64,
                                                                 nhead = 4,

@@ -77,6 +77,8 @@ class VariableLengthDataset(Dataset):
                 reconstruction_params: Optional[List[int]] = None,
                 change_coordinat: bool = False,
                 change_sort: bool = False,
+                probability = None,
+                recos: bool = True
                   ):
         """
         Args:
@@ -87,11 +89,19 @@ class VariableLengthDataset(Dataset):
                      'photon': 1,
                      'fe': 5626}
         self.paticles = paticles
-        data, ev_starts, mc_params = self.read_h5(data_path, mode, mc_params, paticles)
+        data, ev_starts, mc_params, recos = self.read_h5(
+            data_path,
+            mode,
+            mc_params,
+            paticles,
+            probability=probability,
+            load_recos=recos,
+        )
         # prepoccessing
         self.data = data
         self.ev_starts = ev_starts
         self.mc_params = mc_params
+        self.recos = recos
         self.reconstruction_params = reconstruction_params
         if reconstruction_params is not None:
             self.reconstruction_params = [int(i) for i in self.reconstruction_params]
@@ -125,6 +135,10 @@ class VariableLengthDataset(Dataset):
         else:
             # all mc params
             params_CR = mc_params
+        if self.recos is not None:
+            recos = self.recos[idx]
+        else:
+            recos = np.zeros((0,15))
         x = self.data[st:fn]
         if self.change_coordinat:
             # 0.8027 step
@@ -134,11 +148,16 @@ class VariableLengthDataset(Dataset):
             x[..., 1] = x[..., 1] - y_top
         if self.change_sort:
             x=self.sort_tensor(x)
-        return torch.tensor(x), torch.tensor(mc_params[1]), torch.tensor(params_CR)
-    def read_h5(self, data_path, mode, mc_params, paticles: Optional[List[str]] = None):
+        return torch.tensor(x), torch.tensor(mc_params[1]), torch.tensor(params_CR), torch.tensor(recos)
+    def read_h5(self, data_path, mode, mc_params, paticles: Optional[List[str]] = None, 
+                probability: List[float] = None, load_recos: bool = False):
         """
         Читает .h5 файл, выбирает нужный режим и фильтрует события по частицам.
+        load_recos: подгрузить train['recos'] и вернуть строки только для отфильтрованных событий.
         """
+        if probability is None:
+            probability = [1.0] * len(paticles)
+        probability = list(probability) + [1.0] * (len(paticles) - len(probability))
         with h5.File(data_path,'r') as f:
             if mode not in f:
                 raise KeyError(f"В файле нет группы '{mode}'. Доступные ключи: {list(f.keys())}")
@@ -148,18 +167,27 @@ class VariableLengthDataset(Dataset):
             if mc_params:
                 mc_params = torch.tensor(train['mc_params'][()])
                 if paticles is not None:
-                    dt_params, ev_starts, mc_params = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=True)
+                    dt_params, ev_starts, mc_params = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=True,
+                                                    probability = probability)
+            
             else:
                 mc_params = torch.tensor(train['mc_params'][()])
                 if paticles is not None:
-                    dt_params, ev_starts = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=False)
+                    dt_params, ev_starts = self.choise_def_particles(paticles, data = dt_params, ev_starts=ev_starts, mc_params=mc_params, get_mc_params=False,
+                                            probability = probability)
+            if load_recos:
+                recos = torch.tensor(train['recos'][()])
+            else:
+                recos = None
             # mc_params = None
-        return dt_params, ev_starts, mc_params
+        print('recos in reade', recos.shape)
+        return dt_params, ev_starts, mc_params, recos
     def str2mass(self, name: List[str]) -> List[int]:
         #1. mc_parttype (CORSIKA, 1 - gamma, 14 - proton, 5626 - Fe)
         mass_dict = self.mass_dict
         return [mass_dict[n] for n in name]
-    def choise_def_particles(self, name: List[str], data, ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
+    def choise_def_particles(self, name: List[str], data, ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False, 
+                            probability: List[float] = None):
         """
         Фильтрует события по типам частиц.
 
@@ -170,14 +198,25 @@ class VariableLengthDataset(Dataset):
             mc_params (Tensor): Метаданные событий.
             par_num (int): Индекс параметра с массой частицы.
             get_mc_params (bool): Вернуть ли отфильтрованные mc_params.
+            probability (List[float]): вероятность для каждого типа частицы (0..1).
+                Если короче len(name), недостающие дополняются 1.0. По умолчанию [1.0]*len(name).
 
         Возвращает:
             Tuple[Tensor, Tensor, Optional[Tensor]]: Отфильтрованные данные, ev_starts, опционально — mc_params.
-        """        
+        """
+        if probability is None:
+            probability = [1.0] * len(name)
+        probability = list(probability) + [1.0] * (len(name) - len(probability))
+
         # Преобразуем имена частиц в массы
         mass = self.str2mass(name)
-        # Создаем маску для выбора нужных частиц
-        mask = torch.isin(mc_params[:, par_num], torch.tensor(mass, device=mc_params.device))
+        # Булева маска для корректной индексации (не 0/1!)
+        mask = torch.zeros(mc_params.shape[0], dtype=torch.bool, device=mc_params.device)
+        for i, m in enumerate(mass):
+            mask_per_mass = torch.isin(mc_params[:, par_num], torch.tensor([m], device=mc_params.device))
+            rand_vals = torch.rand(mask_per_mass.shape[0], device=mc_params.device)
+            probability_mask = rand_vals < probability[i]
+            mask = mask | (mask_per_mass & probability_mask)
         # Применяем маску к mc_params и ev_starts
         mc_params_filtered = mc_params[mask]
         # Вычисляем новые индексы начала событий
@@ -252,21 +291,26 @@ def collate_fn_many_args(batch: Tensor, start_token: Tensor, stop_token: Tensor,
     """
     # start_token, stop_token = torch.zeros((1,6)), torch.zeros((1,6))
     # Извлекаем каждую последовательность в батче
+    # for i in range(len(batch)):
+    #     print(i, batch[i])
     if mc_params:
         sequences = []
         params = None
         particles = None
-        for item, part, par  in batch:
+        recos = None
+        for item, part, par, recos_  in batch:
             sequences.append(torch.cat((start_token, item, stop_token), dim=0))
             if params is None:
                 params = par.unsqueeze(0)
                 particles = part.unsqueeze(0)
+                recos = recos_.unsqueeze(0)
             else:
                 params = np.concatenate((params, par.unsqueeze(0)), axis=0)
                 particles = np.concatenate((particles, part.unsqueeze(0)), axis=0) 
+                recos = np.concatenate((recos, recos_.unsqueeze(0)), axis=0)
         # Заполняем последовательности до одинаковой длины
         padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=padding_value)  # (batch_size, max_seq_len, 5)
-        return padded_sequences, torch.tensor(particles), torch.tensor(params)
+        return padded_sequences, torch.tensor(particles), torch.tensor(params), torch.tensor(recos)
     else: 
         sequences = [torch.cat((start_token, item, stop_token), dim=0) for item in batch]
         # Заполняем последовательности до одинаковой длины

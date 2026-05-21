@@ -7,15 +7,16 @@ take_log_wf = True
 used_dt_wfs = False
 reco_key = 'reco_ivanov'
 iter_step = 100000
-h5_in = 'pr_photon_0001_excl_sat_T_excl_geo_T.h5'
-h5_out = h5_in#[:-3]+'_bundled.h5'
+h5_in = 'pr_photon_0001_excl_sat_T_excl_geo_T_plus_bdt_params.h5'
+h5_out = 'pr_photon_0001_excl_sat_T_excl_geo_T_plus_bdt_params.h5'#[:-3]+'_bundled.h5'
 MC_dir_path_ROBERT = '/home3/rfit/Telescope_Array/phd_work/data/'
 h5_in = os.path.join(MC_dir_path_ROBERT, 'merged/', h5_in)
 os.makedirs('/home3/rfit/Telescope_Array/phd_work/data/bundled', exist_ok=True)
 h5_out = os.path.join(MC_dir_path_ROBERT, 'bundled', h5_out)
 
-take_bdt_params = ()#0,1,2,5,8,10,11,12,13)
+take_bdt_params = (0,1,2,5,8,10,11,12,13)
 take_reco = (0,1,4,5)
+# take_reco = list(range(15))
 aux_vals = np.array( [-5., -5., 0., 0., 0., 0.] ).astype(np.float32)
 
 proc = 0
@@ -40,7 +41,11 @@ with h5.File(h5_in,'r') as hi, h5.File(h5_out,'w') as ho:
     ho_ds['det_max_params'] = ho.create_dataset('det_max_params', shape=(num_evs,6), dtype=np.float32 )
     ho_ds['dt_mask'] = ho.create_dataset('dt_mask', shape=(num_hits,2), dtype=np.float32 ) # mask for saturated and geo-excluded dets
     # ho_ds['dt_bunlde_mask'] = ho.create_dataset('dt_bunlde_mask', shape=(num_evs,6,6,2), dtype=np.float32 )
-    
+    print(
+        'take_reco', hi[reco_key].shape,
+        'reco_rubtsov_params', hi['reco_rubtsov_params'].shape,
+        'recos', ho_ds['recos'].shape,
+    )
     with tqdm(total=num_evs, desc=f"Processing all", leave=False) as pbar:
         while proc<num_evs:
             step = min(iter_step,num_evs-proc)
@@ -65,7 +70,7 @@ with h5.File(h5_in,'r') as hi, h5.File(h5_out,'w') as ho:
                 ho_ds['wfs_flat'][f_hit:l_hit] = wfs
             ho_ds['dt_params'][f_hit:l_hit] = dts
             # сшивка всех параметров иванова + всех параметров рубцова + каких-то bdt_params
-            ho_ds['recos'][f_ev:l_ev] = np.concatenate( (hi[reco_key][f_ev:l_ev][:,take_reco],hi['reco_rubtsov_params'][f_ev:l_ev]), axis=1 ) # hi['bdt_params'][f_ev:l_ev][:,take_bdt_params]
+            ho_ds['recos'][f_ev:l_ev] = np.concatenate( (hi[reco_key][f_ev:l_ev][:,take_reco],hi['reco_rubtsov_params'][f_ev:l_ev],hi['bdt_params'][f_ev:l_ev][:,take_bdt_params]), axis=1 ) # hi['bdt_params'][f_ev:l_ev][:,take_bdt_params]
             # most active
             idxs_mostQ = np.array([l_ev_starts[i]+np.argmax(dts[l_ev_starts[i]:l_ev_starts[i+1],3]) for i in range(step)])
             mostQ_params = np.array([ dts[idx] for idx in idxs_mostQ ])

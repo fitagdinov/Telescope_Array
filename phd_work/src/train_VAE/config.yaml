@@ -1,10 +1,10 @@
 mode: Latent
 input_dim: 6
-hidden_dim: 128
-latent_dim: 16
+hidden_dim: 64
+latent_dim: 8
 num_layers: 4
-batch_size: 100
-lr: 3e-5
+batch_size: 150
+lr: 1e-4
 epoches: 30
 lstm2: False
 reconstruction_params: 
@@ -21,37 +21,49 @@ reconstruction_params:
     # 9. mc_border_distance, km 
 # нужный писать индексы
   - 3
-  - 4
-  - 5
+  # - 4
+  # - 5
 #data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
-data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_T_excl_geo_T_one_work.h5'
-#for masking in dataloader
+# data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_T_excl_geo_T_one_work.h5'
+# data_path: '/home3/ivkhar/TA/data/MC/normed/gamma_search/pr_ga_all_0001_eq_eff_normed.h5'
+data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/Ivan_Kharuk_pr_ga_all_0001_eq_eff_normed_one_work.h5'
+#for masking in dataloade
 padding_value: -11.0
 stop_token: -10.0
 start_token: hard_v1
 CLS_token: trainable
+koef_MMD: 0.05 # best 0.05
 koef_KL:
-  start: 0.0001
-  end: 0.05
-  num_zero: 0
-koef_DL: 0.1
+  start: 0.0
+  end: 0.0
+  start_it: 0
+  end_it: 30
+koef_DL: 0.0
 koef_mass: 0.0
 reparameterize_koef: 1.0
+change_coordinat: False
+change_sort: False
 paticles:
   train:
     - pr
-    # - photon
+    - photon
   test:
     - pr
     - photon
+  # изначальный датасет фотонов в 2 раза примерно ниже протонного 
+  # т.е. чтобы было фотонов в 10 раз меньше train_probability для них 0.2
+  train_probability:
+    - 1.0
+    - 0.01
 
-koef_loss: [1,1,0,1,1,1]
-split_num: 100000
+koef_loss: [0,0,0,1,1,1]
+denoise_koef: 0.05
+split_num: 10000
 exp: AutoEncoder3
 use_mask: True
-PATH: variavle_KL_cont2
+PATH: info_Transfoemr_Kharuk_one_work_photon_0.01_FullyConnected_4
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder
 show_index:
   - 1
@@ -60,5 +72,5 @@ show_index:
 write_param:
   # - 'hidden_dim'
   - 'paticles'
-chpt: '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/variavle_KL/last'
+chpt: None #/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/info_Transfoemr_MMD_0.05_KL_0.01_new_MMD2_MMD_KL_0/best
 # chpt: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_2Transformer_CLS/best

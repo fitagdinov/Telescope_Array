@@ -44,15 +44,28 @@ from classification_loss import ClassificationLoss
 from classification_metrics import ClassificationMetrics
 logger = logging.getLogger()
 
+
+ADD_LATTENT = True
+
 class ClassificationPipline(Pipline):
     def __init__(self, config, need_train_DS: bool = True,  many_val_loaders =False):
         super().__init__(config, need_train_DS,  many_val_loaders =False)
         self.device = 'cuda'
+        if ADD_LATTENT:
+            from classification_add_lattent import ClassificationAddLattent
+            self.model_encoder = ClassificationAddLattent(input_dim=6, hidden_dim=64, latent_dim=8,
+                embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/info_Transfoemr_MMD_0.05_KL_0.01_new_MMD2_MMD_increase_cont/best',
+                device='cuda:0')
+        else:
+            self.model_encoder = None
         if self.config['used_model'] == 'Simple_classifiacation_model':
             self.model = Class_models.Simple_classifiacation_model(
                                                                **self.config)
         elif self.config['used_model'] == 'TransformerClassificationModel':
             self.model = Class_models.TransformerClassificationModel(
+                                                               **self.config)
+        elif self.config['used_model'] == 'FullyConnectedClassificationModel':
+            self.model = Class_models.FullyConnectedClassificationModel(
                                                                **self.config)
         else:
             raise ValueError('Unknown model type')
@@ -68,7 +81,11 @@ class ClassificationPipline(Pipline):
         print(self.model.parameters())
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=float(self.config['lr']))
         self.best_score = -1.0
-        self.Metrics = ClassificationMetrics(TBwriter=None, num_class = len(self.config['paticles']))
+        # SummaryWriter создаётся в базовом Pipline, здесь просто пробрасываем
+        self.Metrics = ClassificationMetrics(
+            TBwriter=self.writer,
+            num_class=len(self.config['paticles']['train'])
+        )
         self.save_model_path = os.path.join(self.config['save_model_path'], self.config['PATH'])
     
     def _calculate_class_weights(self):
@@ -79,7 +96,7 @@ class ClassificationPipline(Pipline):
         class_counts = {}
         total_samples = 0
         
-        for x, part, _ in self.train_loader:
+        for x, part, params, recos in self.train_loader:
             part = torch.where(part == 1, 0, 1)  # 0- photon, 1- proton
             unique, counts = torch.unique(part, return_counts=True)
             
@@ -110,8 +127,10 @@ class ClassificationPipline(Pipline):
             self.writer.add_scalar("lr_scheduler", self.optimizer.param_groups[0]['lr'], epoch)
             self.model.train()
             pbar = tqdm(self.train_loader, desc =f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: 0.0")
-            for x, part, _ in pbar:  # x должен быть пакетом последовательностей с заполнением
+            for x, part, params, recos in pbar:  # x должен быть пакетом последовательностей с заполнением
                 self.optimizer.zero_grad()
+                if self.model_encoder is not None:
+                    x = self.model_encoder(x, recos)
                 x = x.to(self.device)
                 part = torch.where(part == 1, 0, 1).to(self.device) # 0- photon, 1- proton
                 pred_mass = self.model(x)
@@ -145,8 +164,10 @@ class ClassificationPipline(Pipline):
         y_target = None
         with torch.no_grad():
             # self.val_loaders is list which has one dataloader if many_val_loaders = Flase in piplene
-            for x, part, _ in tqdm(self.val_loaders[0]):
+            for x, part, params, recos in tqdm(self.val_loaders[0]):
                 x = x.to(self.device)
+                if self.model_encoder is not None:
+                    x = self.model_encoder(x, recos)
                 part = torch.where(part == 1, 0, 1).to(self.device) # 0- photon, 1- proton
                 pred_mass = self.model(x)
                 loss = self.Loss(pred_mass, part, list(self.model.parameters()))
@@ -183,8 +204,10 @@ class ClassificationPipline(Pipline):
         print(getting_dataloader)
         with torch.no_grad():
             # self.val_loaders is list which has one dataloader if many_val_loaders = Flase in piplene
-            for x, part, _ in tqdm(getting_dataloader):
+            for x, part, params, recos in tqdm(getting_dataloader):
                 x = x.to(self.device)
+                if self.model_encoder is not None:
+                    x = self.model_encoder(x, recos)
                 part = torch.where(part == 1, 0, 1).to(self.device) # 0- photon, 1- proton
                 pred_mass = self.model(x)
                 if y_preds is None:

@@ -9,7 +9,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 import shutil 
-print(os.getenv('CUDA_VISIBAL_DEVICE'))
+print(os.getenv('CUDA_VISIBLE_DEVICES'))
 MODE = "ITERATE" #["MEAN", "ITERATE"]
 class BertAugmentation():
     def __init__(self,
@@ -18,7 +18,7 @@ class BertAugmentation():
         self.pipline_BERT = PiplineMask('phd_work/src/BERT/config.yaml')
         self.pipline_BERT.model.load(bert_path)
         VAE_state_dict = torch.load(embading_path)
-        self.encoder_model = Encoder_Transformer(6,128, 16,
+        self.encoder_model = Encoder_Transformer(6,64, 8,
                             stop_token = self.pipline_BERT.config['stop_token'],
                             padding_value=self.pipline_BERT.config['padding_value'])
         embading_state_dict = {}
@@ -59,7 +59,7 @@ class BertAugmentation():
                 embads_dict[0] = emb.to('cpu').detach().numpy()
             if MODE == "ITERATE":
                 for i in range(1, nums+1):
-                    x = self.pipline_BERT.run_ones(x)
+                    x, mask = self.pipline_BERT.run_ones(x)
                     emb,_,_ = self.encoder_model(x)
                     if i in embads_dict.keys():
                         embads_dict[i] = np.concatenate((embads_dict[i], 
@@ -87,11 +87,10 @@ class BertAugmentation():
         print("SAVING IS FINISH")
         
 # embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_CLS FIRST_CONT_DecoderTransformer_LR305/last'
-embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/small_decoder/last'
-embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/variavle_KL/best'
-run_dir = '/home/rfit/Telescope_Array/phd_work/src/BERT/augmentation_research/variavle_KL' + MODE
+embading_path = '/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/info_Transfoemr_MMD_0.05_KL_0.01_new_MMD2_MMD_increase_cont/best'
+run_dir = '/home/rfit/Telescope_Array/phd_work/src/BERT/augmentation_research/info_Transfoemr_best' + MODE
 os.makedirs(run_dir, exist_ok=True)
 augmentation_pipline = BertAugmentation(embading_path = embading_path)
-augmentation_pipline.run(nums=8, dl_n = 0, save_dir = os.path.join(run_dir, 'proton'))
+augmentation_pipline.run(nums=20, dl_n = 0, save_dir = os.path.join(run_dir, 'proton'))
 
-augmentation_pipline.run(nums=8, dl_n = 1,save_dir = os.path.join(run_dir, 'photon'))
+augmentation_pipline.run(nums=20, dl_n = 1,save_dir = os.path.join(run_dir, 'photon'))
