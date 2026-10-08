@@ -1,3 +1,4 @@
+from torch.autograd import variable
 from tqdm import tqdm
 import argparse
 import h5py as h5
@@ -15,12 +16,13 @@ print('Using device:', device)
 import model as Model
 import datasets as DataSet
 import loss as Loss
+import sys
 from typing import Optional, Tuple, Union
 
 from torch.utils.tensorboard import SummaryWriter
 
-
-from utils import get_time, get_params_str, show_pred, read_config, clean_mask
+from metric import LatentMetric, DivedeMetrics
+from utils import get_time, get_params_str, show_pred, read_config, clean_mask, MCPAR_index2srt, draw_logvar_mu
 import logging
 import tensorflow as tf
 import tensorboard as tb
@@ -74,9 +76,20 @@ class Pipline():
         writer.add_text('hparams',  str(config))
         kwargs = DataSet.get_params_mask(config)
         kwargs['mc_params'] = True
+        kwargs['th_num_det'] = config['th_num_det']
         collate_fn = DataSet.wrapper_mask(DataSet.collate_fn_many_args, **kwargs)
         if need_train_DS:
-            dataset = DataSet.VariableLengthDataset(config['data_path'], 'train', paticles=config['paticles']['train'], mc_params=True)
+            dataset = DataSet.VariableLengthDataset(config['data_path'], 'train',
+                                                    paticles=config['paticles']['train'],
+                                                    mc_params=True,
+                                                    reconstruction_params=config['reconstruction_params'],
+                                                    change_coordinat = config["change_coordinat"],
+                                                    change_sort = config['change_sort'],
+                                                    probability = config['paticles']['train_probability'],
+                                                    recos=True,
+                                                    make_real_time=config['make_real_time'],
+                                                    reduce_grid = config['reduce_grid'],
+                                                    )
             train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
         else:
             dataset = None
@@ -85,23 +98,63 @@ class Pipline():
         if many_val_loaders:
             val_loaders = []
             for p in config['paticles']['test']:
-                val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=[p], mc_params=True)
+                val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test',
+                                                            paticles=[p], mc_params=True,
+                                                            reconstruction_params=config['reconstruction_params'],
+                                                            change_coordinat=config.get("change_coordinat", False),
+                                                            change_sort=config.get('change_sort', False),
+                                                            recos=True,
+                                                            make_real_time=config['make_real_time'],
+                                                            reduce_grid = config['reduce_grid'],
+                                                            )
                 val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
                 val_loaders.append(val_loader)
         else:
-            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test', paticles=config['paticles']['test'], mc_params=True)
+            val_dataset = DataSet.VariableLengthDataset(config['data_path'], 'test',
+                                                        paticles=config['paticles']['test'],
+                                                        mc_params=True,
+                                                        reconstruction_params=config['reconstruction_params'],
+                                                        change_coordinat=config.get("change_coordinat", False),
+                                                        change_sort=config.get('change_sort', False),
+                                                        recos=True,
+                                                        make_real_time=config['make_real_time'],
+                                                        reduce_grid = config['reduce_grid'],
+                                                        )
             val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
             val_loaders = [val_loader]        
         start_token = kwargs['start_token'].to(device)
-        model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], lstm2=config['lstm2'], start_token=start_token).to(device)
+        model = Model.VAE(config['input_dim'], config['hidden_dim'], config['latent_dim'], lstm2=config['lstm2'], start_token=start_token,
+                          padding_value = config['padding_value'],
+                          stop_token = config['stop_token'],
+                          num_layers = config['num_layers'],
+                          reconstruction_params = config['reconstruction_params'],
+                          reparameterize_koef = config['reparameterize_koef'],
+                          denoise_koef = config['denoise_koef'],
+                          recos_in_latten = config['recos_in_latten'],
+                          index_recos = config['index_recos'],
+                          ).to(device)
         if config['chpt'] != 'None':
             model.load(config['chpt'])
-        optimizer = optim.Adam(model.parameters(), lr=float(config['lr']))
+
+        # differnet optimize
+
+        # optimizer = optim.Adam(model.parameters(), lr=float(config['lr']))
+        optimizer = optim.AdamW(model.encoder.parameters(), lr=float(config['lr']))
+        optimizer_decoder = optim.AdamW(model.decoder.parameters(), lr=float(config['lr']))
+        if dataset is not None:
+            self.norm_params = dataset.norm_param
+        else:
+            self.norm_params = val_dataset.norm_param
         # write augmentes
         self.optimizer = optimizer
+        self.optimizer_decoder = optimizer_decoder
         self.train_loader = train_loader
         self.model = model
         self.writer = writer
+        print('split_num',config['split_num'], type(config['split_num']) )
+        self.metric_lattent = LatentMetric(num_split=int(config['split_num']))
+        self.metric_divide = DivedeMetrics(num_split=int(config['split_num']))
+        self.metric_f1_best = 0
         return {'train_loader': train_loader, 'val_loaders': val_loaders, 'model': model, 'optimizer': optimizer, 'writer': writer}
     def load_chpt(self, chpt_path: str):
         """
@@ -129,7 +182,16 @@ class Pipline():
         self.epochs = config['epoches']
         self.mask = config['padding_value']
         self.show_index = config['show_index']
-        self.koef_KL = config['koef_KL']
+        self.koef_KL = np.zeros(self.epochs)
+        # koef_KL:
+        #     start: 0.0001
+        #     end: 0.005
+        #     start_it: 0
+        #     end_it: 20
+        self.koef_KL[config['koef_KL']['start_it']:config['koef_KL']['end_it']] = np.linspace(config['koef_KL']['start'], config['koef_KL']['end'], config['koef_KL']['end_it']-config['koef_KL']['start_it'])
+        self.koef_KL[config['koef_KL']['end_it']:] = config['koef_KL']['end']
+        self.koef_KL = torch.tensor(self.koef_KL).to(device)
+        print('self.koef_KL', self.koef_KL)
         self.koef_DL = config['koef_DL']
         self.koef_mass = config['koef_mass']
 
@@ -139,6 +201,7 @@ class Pipline():
         koef_loss = torch.tensor(config['koef_loss']).unsqueeze(0).to('cpu')
         self.paticles = self.config['paticles']
         self.koef_loss = koef_loss.to(device)
+        self.koef_MMD = config['koef_MMD']
         os.makedirs(PATH, exist_ok = True)
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', factor=0.2, patience=5, threshold=0.005,)
     def train(self):
@@ -147,35 +210,54 @@ class Pipline():
         """
         self.loss_best = 1000
         iters = 0
+        self.validation(epoch=0, analys=True)
         for epoch in range(self.epochs):
             print('lr_scheduler', self.optimizer.param_groups[0]['lr'])
             self.writer.add_scalar("lr_scheduler", self.optimizer.param_groups[0]['lr'], epoch)
             self.model.train()
             pbar = tqdm(self.train_loader, desc =f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: 0.0")
-            for x, part, _ in pbar:  # x должен быть пакетом последовательностей с заполнением
+            koef_KL = self.koef_KL[epoch]
+            for x, part, params_CR, recos, padded_sequences_SR in pbar:  # x должен быть пакетом последовательностей с заполнением
+                # x- data
+                # part - promt mc_params in h5(look dataset.py)
+                # params_CR by reconstruction index
                 x = x.to(device)
                 part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
+                params_CR = params_CR.to(device) 
+                recos = recos.to(device)
+                padded_sequences_SR = padded_sequences_SR.to(device)
                 self.optimizer.zero_grad()
-                recon_x, mu, log_var, pred_num, pred_mass = self.model(x)
-                recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
-                                                                                    mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss
+                self.optimizer_decoder.zero_grad()
+                recon_x, mu, log_var, pred_num, recon_pred = self.model(x, recos, padded_sequences_SR)
+                recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
+                                                                                    recon_pred,
+                                                                                    params_CR, 
+                                                                                    part,
+                                                                                    mask=self.mask,
+                                                                                    use_mask=self.use_mask,
+                                                                                    koef_loss=self.koef_loss
+
                                                                                     )
                 num_det_loss *= self.koef_DL
-                kl_divergence *= self.koef_KL
-                mass_loss *= self.koef_mass
-                loss = recon_loss + kl_divergence + num_det_loss + mass_loss
+                kl_divergence *= koef_KL
+                recon_params_loss *= self.koef_mass
+                mmd_loss *= self.koef_MMD
+                loss = recon_loss + kl_divergence + num_det_loss + torch.mean(recon_params_loss) + mmd_loss
                 self.writer.add_scalar("train/Loss", loss, iters)
                 self.writer.add_scalar("train/KL_loss", kl_divergence, iters)
                 self.writer.add_scalar("train/recon_loss", recon_loss, iters)
                 self.writer.add_scalar("train/num_det_loss", num_det_loss, iters)
-                self.writer.add_scalar("train/mass_loss", mass_loss, iters)
+                self.writer.add_scalar("train/mmd_loss", mmd_loss, iters)
+                
                 loss.backward()
                 self.optimizer.step()
+                self.optimizer_decoder.step()
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
                 iters += 1
-            
-            self.validation(epoch=epoch, analys=True)
-    def validation(self, epoch: Optional[int] = None, analys:bool=False) -> None:
+            self.writer.add_scalar("train/koef_KL", koef_KL, epoch)
+            self.validation(epoch=epoch, analys=True, koef_KL=koef_KL)
+
+    def validation(self, epoch: Optional[int] = None, analys:bool=False, koef_KL: Optional[torch.Tensor] = None) -> None:
         """
         Performs validation on the model using the validation dataset.
 
@@ -191,7 +273,7 @@ class Pipline():
         epoch = epoch if epoch is not None else -1
         model = self.model
         val_loaders = self.val_loaders
-        koef_KL = self.koef_KL
+        koef_KL = koef_KL if koef_KL is not None else self.koef_KL[epoch]
         koef_DL = self.koef_DL
 
         model.eval()
@@ -199,30 +281,73 @@ class Pipline():
         KL_loss_mean = np.array([])
         recon_loss_mean = np.array([])
         num_det_loss_mean = np.array([])
+        embading_dict = {}
+        recon_loss_dict = {}
+        KL_loss_dict = {}
+        preds_log_var_dict = {}
+        num_det_list = {}
         for i, val_loader in enumerate(val_loaders):
             particle = self.config['paticles']['test'][i]
-            loss, KL, recon, num_det = self.validation_step(epoch=epoch, val_loader=val_loader, model=model, koef_KL=koef_KL, koef_DL=koef_DL,particle=particle)
+            loss, KL, recon, num_det, embading, preds_log_var, preds_num_det, mmd_loss_list = self.validation_step(epoch=epoch, 
+                                                                    val_loader=val_loader, 
+                                                                    model=model,
+                                                                    koef_KL=koef_KL, 
+                                                                    koef_DL=koef_DL,
+                                                                    particle=particle,
+                                                                    reduce_loss_per_event=True,
+                                                                    return_log_var_and_num_det=True)
             loss_mean = np.concatenate((loss_mean, loss))
             KL_loss_mean = np.concatenate((KL_loss_mean, KL))
             recon_loss_mean = np.concatenate((recon_loss_mean, recon))
             num_det_loss_mean = np.concatenate((num_det_loss_mean, num_det))
+            # все что выше можно потом убрать 
+            recon_loss_dict[particle] = recon
+            KL_loss_dict[particle] = KL
+            embading_dict[particle] = embading
+            preds_log_var_dict[particle] = preds_log_var
             loss_final = loss_mean.mean()
+            print(preds_log_var.shape, embading.shape,recon.shape, KL.shape)
+            self.writer.add_scalar(f"val/Loss/all/{particle}", loss.mean(), epoch)
+            self.writer.add_scalar(f"val/KL_loss/all/{particle}", KL.mean(), epoch)
+            self.writer.add_scalar(f"val/recon_loss/all/{particle}", recon.mean(), epoch)
+            self.writer.add_scalar(f"val/num_det_loss/{particle}", num_det.mean(), epoch)
+            self.writer.add_scalar(f"val/mmd_loss_list/{particle}", mmd_loss_list.mean(), epoch)
+            #draw logvar and mu
+        fig = draw_logvar_mu(list(preds_log_var_dict.values()), 
+                            list(embading_dict.values()), 
+                            list(preds_log_var_dict.keys()))
+        self.writer.add_figure(f"val/logvar_mu", fig, epoch)
+
+        
         # write in TB
-        self.writer.add_scalar("val/Loss/all", loss_final, epoch)
+        # self.writer.add_scalar("val/Loss/all", loss_final, epoch)
         # self.writer.add_scalar("val/KL_loss/all", KL_loss_mean.mean(), epoch)
-        self.writer.add_scalar("val/recon_loss/all", recon_loss_mean.mean(), epoch)
-        self.writer.add_scalar("val/num_det_loss/all", num_det_loss_mean.mean(), epoch)
+        # self.writer.add_scalar("val/recon_loss/all", recon_loss_mean.mean(), epoch)
+        # self.writer.add_scalar("val/num_det_loss/all", num_det_loss_mean.mean(), epoch)
+        metric_f1, fig= self.metric_lattent(embading_dict['pr'], embading_dict['photon'])
+        _, fig_divide = self.metric_divide( recon_loss_dict['pr'], recon_loss_dict['photon'], 
+                                            KL_loss_dict['pr'], KL_loss_dict['photon'],
+                                            embading_dict['pr'], embading_dict['photon'],
+                                            )
+        self.writer.add_figure("val/lattent", fig, epoch)
+        self.writer.add_figure("val/divide", fig_divide, epoch)
+        self.writer.add_scalar("val/divide_f1", metric_f1, epoch)
+        
         if analys:
             if epoch>0:
                 self.scheduler.step(loss_final)
-            if loss_final<self.loss_best:
-                self.loss_best = loss_final
+            if metric_f1>self.metric_f1_best:
+                self.metric_f1_best = metric_f1
                 torch.save(model.state_dict(), os.path.join(self.PATH, f'best'))
+            torch.save(model.state_dict(), os.path.join(self.PATH, f'last'))
 
-            print(f'Epoch {epoch + 1}, Loss: {loss_final} loss_best {self.loss_best}')
+            print(f'Epoch {epoch + 1}, Loss: {loss_final} metric_f1 {self.metric_f1_best}')
 
     def validation_step(self, epoch: int, val_loader, model,
-                    koef_KL=1, koef_DL=1, particle=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                    koef_KL=1, koef_DL=1, particle=None,
+                    reduce_loss_per_event:bool = False, 
+                    return_log_var_and_num_det:bool = False,
+                    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Одна итерация валидации по одному типу частиц.
 
@@ -242,136 +367,199 @@ class Pipline():
         KL_loss_mean = []
         recon_loss_mean = []
         num_det_loss_mean = []
+        recon_params_loss_mean = [0]*len(self.config['reconstruction_params'])
+        embading = np.zeros((0, self.config['latent_dim']))
         pbar_val = tqdm(val_loader, desc =f"VAL Epoch {epoch + 1} in {particle}, Loss: 0.0")
-        for x, part, _ in pbar_val:  # x should be a batch of sequences with padding
-            x = x.to(device)
-            part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
-            recon_x, mu, log_var, pred_num, pred_mass = model(x)
-            recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
-                                                                                    mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss
-                                                                                    )
-            mass_loss *= self.koef_mass
-            kl_divergence *= koef_KL
-            num_det_loss *= koef_DL
-            loss = recon_loss + kl_divergence + num_det_loss
-            loss_mean.append(loss.item())
-            KL_loss_mean.append(kl_divergence.item())
-            recon_loss_mean.append(recon_loss.item())
-            num_det_loss_mean.append(num_det_loss.item())
-            pbar_val.set_description(f"VAL Epoch {epoch + 1} in {particle}, Loss: {loss.item():.4f}")
+        num_examples = 0
+        preds_log_var = np.zeros((0,self.config['latent_dim']))
+        preds_num_det = np.zeros((0, 1))
+        mmd_loss_list = []
+        for x, part, params_CR, recos, padded_sequences_SR in pbar_val:  # x should be a batch of sequences with padding
+            num_examples += x.size(0)
 
-        loss_final = np.array(loss_mean).mean()
-        # write in TB
-        self.writer.add_scalar(f"val/Loss/{particle}", loss_final, epoch)
-        # self.writer.add_scalar(f"val/KL_loss/{particle}", np.array(KL_loss_mean).mean(), epoch)
-        self.writer.add_scalar(f"val/recon_loss/{particle}", np.array(recon_loss_mean).mean(), epoch)
-        self.writer.add_scalar(f"val/num_det_loss/{particle}", np.array(num_det_loss_mean).mean(), epoch)
+            with torch.no_grad():
+                recos = recos.to(device)
+                x = x.to(device)
+                part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
+                params_CR = params_CR.to(device) 
 
+                padded_sequences_SR = padded_sequences_SR.to(device)
+                recon_x, mu, log_var, pred_num, recon_pred = model(x, recos, padded_sequences_SR)
+                recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
+                                                                                        recon_pred,
+                                                                                        params_CR, 
+                                                                                        part,
+                                                                                        mask=self.mask,
+                                                                                        use_mask=self.use_mask,
+                                                                                        koef_loss=self.koef_loss,
+                                                                                        reduce_loss_per_event=reduce_loss_per_event
+
+                                                                                        )
+                embading = np.concatenate((embading, mu.cpu().detach().numpy()), axis=0)
+                preds_log_var = np.concatenate((preds_log_var, log_var.cpu().detach().numpy()), axis=0)
+                preds_num_det = np.concatenate((preds_num_det, pred_num.cpu().detach().numpy()), axis=0)
+                
+                # kl_divergence *= koef_KL
+                # num_det_loss *= koef_DL
+                # recon_params_loss *= self.koef_mass
+                if reduce_loss_per_event:
+                    recon_loss_mean.append(recon_loss.to('cpu').numpy())
+                    KL_loss_mean.append(kl_divergence.to('cpu').numpy())
+                    num_det_loss_mean.append(num_det_loss.to('cpu').numpy())
+                    mmd_loss_list.append(mmd_loss.cpu().detach().numpy())
+                
+                    # Вычисляем общий loss для каждого события
+                    if len(recon_params_loss.shape) == 1:
+                        # recon_params_loss уже (batch,)
+                        total_loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + recon_params_loss*self.koef_mass +mmd_loss*self.koef_MMD
+                    else:
+                        # recon_params_loss (batch, params), усредняем по params
+                        recon_params_loss_mean_per_event = torch.mean(recon_params_loss, dim=1)  # (batch,)
+                        total_loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + recon_params_loss_mean_per_event*self.koef_mass + mmd_loss*self.koef_MMD
+                    loss_mean.append(total_loss.to('cpu').numpy())
+                else:
+                    loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + torch.mean(recon_params_loss)*self.koef_mass
+                    loss_mean.append(loss.item())
+                    KL_loss_mean.append(kl_divergence.item())
+                    recon_loss_mean.append(recon_loss.to('cpu').item())
+                    num_det_loss_mean.append(num_det_loss.item())
+                    mmd_loss_list.append(mmd_loss.cpu().detach().numpy().item())
+                    for i,par in enumerate(recon_params_loss_mean): 
+                        recon_params_loss_mean[i] += recon_params_loss[i].to('cpu').item()
+                pbar_val.set_description(f"VAL Epoch {epoch + 1} in {particle}")
         #show from last batch
         real = x[self.show_index]
+        print(recon_x.shape)
         fake = recon_x[self.show_index]
         num = pred_num[self.show_index]
         for ii in range(len(self.show_index)):
             # get from back side
             i = -ii
-            fig = show_pred(real[i], fake[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = num[i])
+            fig = show_pred(real[i], fake[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = num[i], real_time=self.config['make_real_time'])
             self.writer.add_figure(f"val/show_pred_{ii}/{particle}", fig, epoch)
-        return np.array(loss_mean), np.array(KL_loss_mean), np.array(recon_loss_mean), np.array(num_det_loss_mean)
-    
+        
+        if reduce_loss_per_event:
+            # Конкатенируем все батчи в один массив для каждого события
+            loss_mean = np.concatenate(loss_mean) if len(loss_mean) > 0 else np.array([])
+            recon_loss_mean = np.concatenate(recon_loss_mean) if len(recon_loss_mean) > 0 else np.array([])
+            KL_loss_mean = np.concatenate(KL_loss_mean) if len(KL_loss_mean) > 0 else np.array([])
+            num_det_loss_mean = np.concatenate(num_det_loss_mean) if len(num_det_loss_mean) > 0 else np.array([])
+            mmd_loss_list = np.array(mmd_loss_list) if len(mmd_loss_list) > 0 else np.array([])
+            if return_log_var_and_num_det:
+                return loss_mean, KL_loss_mean, recon_loss_mean, num_det_loss_mean, embading, preds_log_var, preds_num_det, mmd_loss_list
+            else:
+                return loss_mean, KL_loss_mean, recon_loss_mean, num_det_loss_mean, embading, mmd_loss_list
+        # recon_params_loss_mean = torch.concat(recon_params_loss_mean, dim=1).numpy()
+        # recon_params_loss_mean = np.array(recon_params_loss_mean)/num_examples
+        # loss_final = np.array(loss_mean).mean()
+        # # write in TB
+        # self.writer.add_scalar(f"val/Loss/{particle}", loss_final, epoch)
+        # self.writer.add_scalar(f"val/KL_loss/{particle}", np.array(KL_loss_mean).mean(), epoch)
+        # self.writer.add_scalar(f"val/recon_loss/{particle}", np.array(recon_loss_mean).mean(), epoch)
+        # self.writer.add_scalar(f"val/num_det_loss/{particle}", np.array(num_det_loss_mean).mean(), epoch)
+        # if self.config['reconstruction_params'] is not None:
+        #     for i, ind in enumerate(self.config['reconstruction_params']):
+        #         name_param = MCPAR_index2srt(ind)
+        #         self.writer.add_scalar(f"val/{name_param}/{particle}", recon_params_loss_mean[i].mean(), epoch)
 
-    def predict_latent(self, write_embedding: bool = True, choise_num: Optional[int] = None,
-                   NoneLoss: bool = False) -> Tuple[torch.Tensor, list, Union[torch.Tensor, list]]:
+        # return np.array(loss_mean), np.array(KL_loss_mean), np.array(recon_loss_mean), np.array(num_det_loss_mean), embading
+    def get_num_det_list(self, val_loader):
+        num_det_list = np.array([])
+        for x, part, *_ in val_loader:
+            x = x.to(device)
+            num_det = Loss.calc_det(x,self.mask,use_mask=False).to('cpu').detach().numpy()
+            # return array like [7 7 7 7 7 7] - теперь num_det уже имеет форму (batch,)
+            num_det_list = np.concatenate((num_det_list, num_det))
+        return num_det_list
+
+    def test(self, model_path: str = None, path_save: str = None):
         """
-        Вывод латентного пространства. Опционально логирует эмбеддинги в TensorBoard.
+        Тестируем модель. Смотрим на разделение частиц по функции ошибок
 
-        Аргументы:
-            write_embedding (bool): Логировать ли в TensorBoard.
-            choise_num (int, optional): Ограничить выборку указанным числом точек.
-            NoneLoss (bool): Если True, не усреднять потери.
-
-        Возвращает:
-            Кортеж: латенты, метки частиц, потери реконструкции.
+        1 - строим графики в зависимости от кол-ва детекторов в событии
+        2 - записываем латеные представления, ошики и кол-во детекторов в событии в csv файл
         """
-        # TODO сделать в отдельной функции getl loader
-        writer = SummaryWriter(log_dir=os.path.join('runs_tests', 'tests'))
+        path_save = path_save if path_save is not None else '/home/rfit/Telescope_Array/phd_work/src/train_VAE/Original_VAE_dim_5_norm_0.0_photon_add_recos_CONT'
         model = self.model
-        model.eval()
-        latent_list = []
-        params = []
-        particles = []
-        all_loss = None
-        test_loaders = self.val_loaders
-        dict_info = {}
-        with torch.no_grad():
-            for i, test_loader in enumerate(test_loaders):
-                for x, part, _ in tqdm(test_loader):
+        if model_path is not None:
+            model.load(model_path)
+        val_loaders = self.val_loaders
+        koef_KL = self.koef_KL
+        koef_DL = self.koef_DL
+
+
+        for i, val_loader in enumerate(val_loaders):
+            mode = ''
+            model.eval()
+            KL_loss_mean = np.zeros(0)
+            num_det_list = np.zeros(0)
+            recon_loss_mean = np.zeros(0)
+            num_det_loss_mean = np.zeros(0)
+            recon_params_loss_mean = [0]*len(self.config['reconstruction_params'])
+            embading = np.zeros((0, self.config['latent_dim']))
+            preds_log_var = np.zeros((0,self.config['latent_dim']))
+            preds_num_det = np.zeros((0, 1))
+            mmd_loss_list = np.zeros(0)
+            recos_list = []
+            reconstruction_data_list = []
+            original_data_list = []
+            particle = self.config['paticles']['test'][i]
+            path = os.path.join(path_save, particle)
+            os.makedirs(path, exist_ok=True)
+            with torch.no_grad():
+                for x, part, params_CR, recos, padded_sequences_SR in tqdm(val_loader):  # x should be a batch of sequences with padding
+                
                     x = x.to(device)
+                    recos = recos.to(device)
                     part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
-                    mu, log_var, (h_n, c_n) = model.encoder(x)
-                    recon_x, mu, log_var, pred_num, pred_mass = model(x)
-                    if not(NoneLoss):
-                        # Можно использовать если понадобятся другие лоссы
-                        recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
-                                                                                        mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
-                                                                                        reduce_loss_per_event = True
-                                                                                        )
-                        if all_loss is None:
-                            all_loss = recon_loss.cpu().detach() 
-                        else:
-                            all_loss = torch.cat((all_loss, recon_loss.cpu().detach()))
-                    else:
-                        recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss_none(recon_x, x, mu, log_var, pred_num, pred_mass, part,
-                                                                                        mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
-                                                                                        )
-                        if all_loss is None:
-                            all_loss = []
-                            all_loss.append(recon_loss.cpu().detach())
-                        else:
-                            all_loss.append(recon_loss.cpu().detach())
-                    latent_list.append(mu.cpu())
-                    # params.append(par.cpu())
-                    particles += [self.config['paticles']['test'][i]] * mu.shape[0] # for equal lenght with latent
+                    params_CR = params_CR.to(device) 
+                    padded_sequences_SR = padded_sequences_SR.to(device)
+                    num_det = Loss.calc_det(x,self.mask,use_mask=False).to('cpu').detach().numpy()
+                    num_det_list = np.concatenate((num_det_list, num_det), axis=0)
 
-                    #write in dict
-                    # TODO otimize
-                    try:
-                        dict_info[self.config['paticles']['test'][i]] = torch.cat((dict_info[self.config['paticles']['test'][i]], mu.cpu().detach() ), dim=0)
-                    except KeyError:
-                        dict_info[self.config['paticles']['test'][i]] = mu.cpu().detach() 
-        latent_list = torch.cat(latent_list, dim=0)
-        # params = torch.cat(params, dim=0)
-        # print(params.shape)
-        if choise_num:
-            latent_list, particles, all_loss = self.select_random_ordered(latent_list, particles, all_loss, int(choise_num))
-        try:
-            if write_embedding:
-                writer.add_embedding(latent_list,
-                            metadata=particles,
-                            )
-        except Exception as e:
-            # logger.log_exception(e)
-            print(e)
-        return latent_list, particles, all_loss#params
-    def select_random_ordered(self, latent_list, particles, all_loss, m):
-        n = len(particles)
-        assert n == latent_list.shape[0], "Размеры данных не совпадают"
-        assert m <= n, "m не может превышать n"
+                    recon_x, mu, log_var, pred_num, recon_pred = model(x, recos, padded_sequences_SR)
+                    print('shape for SR', padded_sequences_SR.shape, x.shape)
+                    recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
+                                                                                            recon_pred,
+                                                                                            params_CR, 
+                                                                                            part,
+                                                                                            mask=self.mask,
+                                                                                            use_mask=self.use_mask,
+                                                                                            koef_loss=self.koef_loss,
+                                                                                            reduce_loss_per_event=True,
 
-        # Генерация случайных индексов без повторений
-        indices = np.random.choice(n, size=m, replace=False)
-        
-        # Сортировка индексов для сохранения порядка
-        sorted_indices = np.sort(indices)
-        
-        # Выборка данных
-        selected_latent = latent_list[sorted_indices]
-        selected_particles = [particles[i] for i in sorted_indices]
-        try:
-            all_loss = all_loss[sorted_indices]
-        except:
-            all_loss = [all_loss[i] for i in sorted_indices]
-        return selected_latent, selected_particles, all_loss
-    def predict(self, NoneLoss):
+                                                                                            )
+                    recos = recos.to('cpu')
+                    recos_list.append(recos)
+                    for i in range(len(recon_x)):
+                        num = num_det[i]
+                        reconstruction_data = recon_x[i].to('cpu').detach().numpy().reshape(-1, 5)
+                        reconstruction_data = reconstruction_data[1:num+1]
+                        reconstruction_data_list.append(reconstruction_data)
+                        original_data = x[i].to('cpu').detach().numpy()
+                        original_data = original_data[1:num+1]
+                        original_data_list.append(original_data)
+                    embading = np.concatenate((embading, mu.cpu().detach().numpy()), axis=0)
+                    preds_log_var = np.concatenate((preds_log_var, log_var.cpu().detach().numpy()), axis=0)
+                    preds_num_det = np.concatenate((preds_num_det, pred_num.cpu().detach().numpy()), axis=0)
+                    recon_loss_mean = np.concatenate((recon_loss_mean, recon_loss.to('cpu').numpy()), axis=0)
+                    KL_loss_mean = np.concatenate((KL_loss_mean, kl_divergence.to('cpu').numpy()), axis=0)
+                    num_det_loss_mean = np.concatenate((num_det_loss_mean, num_det_loss.to('cpu').numpy()), axis=0)
+                    # mmd_loss_list = np.concatenate((mmd_loss_list, mmd_loss.cpu().detach().numpy()), axis=0)
+                
+                print(f'num_det_list.shape {num_det_list.shape}, recon_loss_mean.shape {recon_loss_mean.shape}, KL_loss_mean.shape {KL_loss_mean.shape}, num_det_loss_mean.shape {num_det_loss_mean.shape}, mmd_loss_list.shape {mmd_loss_list.shape}, embading.shape {embading.shape}, preds_log_var.shape {preds_log_var.shape}, preds_num_det.shape {preds_num_det.shape}')
+                np.save(os.path.join(path, mode, f'num_det.npy'), num_det_list)
+                np.save(os.path.join(path, mode, f'recon_loss.npy'), recon_loss_mean)
+                np.save(os.path.join(path, mode, f'embading.npy'), embading)
+                np.save(os.path.join(path, mode, f'loss_num_det.npy'), num_det_loss_mean)
+                np.save(os.path.join(path, mode, f'preds_log_var.npy'), preds_log_var)
+                np.save(os.path.join(path, mode, f'preds_num_det.npy'), preds_num_det)
+                np.save(os.path.join(path, mode, f'recos.npy'), np.concatenate(recos_list, axis=0))
+                np.save(os.path.join(path, mode, f'reconstruction_data.npy'), np.array(reconstruction_data_list))
+                np.save(os.path.join(path, mode, f'original_data.npy'), np.array(original_data_list))
+    def predict(self, test_loader, i, 
+        NoneLoss: bool = False, 
+        ):
         """
         Предсказывает латентные представления и реконструкции.
         Аргументы:
@@ -389,42 +577,44 @@ class Pipline():
         test_loaders = self.val_loaders
         dict_info = {}
         with torch.no_grad():
-            for i, test_loader in enumerate(test_loaders):
-                for x, part, _ in tqdm(test_loader):
-                    x = x.to(device)
-                    part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
-                    mu, log_var, (h_n, c_n) = model.encoder(x)
-                    recon_x, mu, log_var, pred_num, pred_mass = model(x)
-                    if not(NoneLoss):
-                        # Можно использовать если понадобятся другие лоссы
-                        recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, part,
-                                                                                        mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
-                                                                                        reduce_loss_per_event = True
-                                                                                        )
-                        if all_loss is None:
-                            all_loss = recon_loss.cpu().detach() 
-                        else:
-                            all_loss = torch.cat((all_loss, recon_loss.cpu().detach()))
+            # for i, test_loader in enumerate(test_loaders):
+            for x, part, params_CR, recos in tqdm(test_loader):
+                recos = recos.to(device)
+                x = x.to(device)
+                part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
+                params_CR = params_CR.to(device)
+                mu, log_var, (h_n, c_n) = model.encoder(x)
+                recon_x, mu, log_var, pred_num, pred_mass = model(x, recos)
+                if not(NoneLoss):
+                    # Можно использовать если понадобятся другие лоссы
+                    recon_loss, kl_divergence, num_det_loss, mass_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, params_CR, part,
+                                                                                    mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
+                                                                                    reduce_loss_per_event = True
+                                                                                    )
+                    if all_loss is None:
+                        all_loss = recon_loss.cpu().detach() 
                     else:
-                        recon_loss, kl_divergence, num_det_loss, mass_loss = Loss.vae_loss_none(recon_x, x, mu, log_var, pred_num, pred_mass, part,
-                                                                                        mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
-                                                                                        )
-                        if all_loss is None:
-                            all_loss = []
-                            all_loss.append(recon_loss.cpu().detach())
-                        else:
-                            all_loss.append(recon_loss.cpu().detach())
-                    latent_list.append(mu.cpu())
-                    recon__list.append(recon_x.cpu())
-                    # params.append(par.cpu())
-                    particles += [self.config['paticles']['test'][i]] * mu.shape[0] # for equal lenght with latent
+                        all_loss = torch.cat((all_loss, recon_loss.cpu().detach()))
+                else:
+                    recon_loss, kl_divergence, num_det_loss, mass_loss, mmd_loss = Loss.vae_loss_none(recon_x, x, mu, log_var, pred_num, recon_pred=pred_mass, params_CR=params_CR,
+                                                                                    mask=self.mask, use_mask=self.use_mask, koef_loss=self.koef_loss,
+                                                                                    )
+                    if all_loss is None:
+                        all_loss = []
+                        all_loss.append(recon_loss.cpu().detach())
+                    else:
+                        all_loss.append(recon_loss.cpu().detach())
+                latent_list.append(mu.cpu())
+                recon__list.append(recon_x.cpu())
+                # params.append(par.cpu())
+                particles += [self.config['paticles']['test'][i]] * mu.shape[0] # for equal lenght with latent
 
-                    #write in dict
-                    # TODO otimize
-                    try:
-                        dict_info[self.config['paticles']['test'][i]] = torch.cat((dict_info[self.config['paticles']['test'][i]], mu.cpu().detach() ), dim=0)
-                    except KeyError:
-                        dict_info[self.config['paticles']['test'][i]] = mu.cpu().detach() 
+                #write in dict
+                # TODO otimize
+                try:
+                    dict_info[self.config['paticles']['test'][i]] = torch.cat((dict_info[self.config['paticles']['test'][i]], mu.cpu().detach() ), dim=0)
+                except KeyError:
+                    dict_info[self.config['paticles']['test'][i]] = mu.cpu().detach() 
         latent_list = torch.cat(latent_list, dim=0)
         # variable lenght. So this is not wor
         return latent_list, recon__list, particles, all_loss#params
@@ -447,8 +637,16 @@ if __name__ == "__main__":
     elif args.mode == 'test':
         pipline = Pipline(config, need_train_DS=False)
         print('TEST PIPLINE')
-        pipline.validation()
+        save_path = '/home/rfit/Telescope_Array/phd_work/src/train_VAE/Original_VAE_dim_5_norm__ENERGY_IN_LATTENT'
+        pipline.test(model_path='/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Original_VAE_dim_5_norm__ENERGY_IN_LATTENT/last', path_save=save_path)
     elif args.mode == 'latent':
         pipline = Pipline(config, need_train_DS=False)
         print('Latent PIPLINE')
         pipline.predict_latent(args.write_embading)
+    elif args.mode == 'grid_search':
+        pipline = Pipline(config)
+        print('TRAIN PIPLINE')
+
+        # variable 
+        variable = {'koef_KL': {'start': 1e-3, 'finish': 1e-1, 'step': 2, 'mode': 'mul'}}
+        

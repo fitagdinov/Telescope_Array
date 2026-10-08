@@ -7,7 +7,7 @@
 #export PATH="/home/rfit/miniconda3/envs/python312-env/bin:$PATH"
 export PATH="/home/rfit/miniconda3/bin:$PATH"
 export LD_LIBRARY_PATH=/usr/local/cuda-11.0/lib64
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 #source activate robert_venv
 #source /home/rfit/miniconda3/bin/activate python312-env
 source /home/rfit/miniconda3/bin/activate python39

@@ -1,23 +1,20 @@
+from cProfile import label
 from tqdm import tqdm
 import h5py as h5
 import numpy as np
 import os
 import matplotlib.pyplot as plt
 import torch
-from torch.utils.data import Dataset, DataLoader
-from torch.nn.utils.rnn import pad_sequence
-import torch.nn as nn
-import torch.optim as optim
-from tqdm import tqdm
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-import model as Model
-import datasets as DataSet
-import loss as Loss
-from typing import Optional, Tuple, Union
-import pytorch_warmup as warmup
-from  torch.optim.lr_scheduler import ExponentialLR
-
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.data import Dataset, DataLoader
+# from torch.nn.utils.rnn import pad_sequence
+# import torch.nn as nn
+# import torch.optim as optim
+# from tqdm import tqdm
+# from torch.optim.lr_scheduler import ReduceLROnPlateau
+# import model as Model
+# import datasets as DataSet
+# import loss as Loss
+from typing import Optional, Tuple, Union, Dict, List
 import yaml
 import time
 def get_time() -> str:
@@ -87,7 +84,7 @@ def clean_mask(data: torch.Tensor, tokens: Optional[Tuple[int, int, int]] =None,
     return data[:lenght], lenght   
     
 def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None,
-               lenght_predict: Union[np.ndarray, torch.Tensor] = None) -> plt.figure:
+               lenght_predict: Union[np.ndarray, torch.Tensor] = None, real_time: bool = False) -> plt.figure:
     '''
     data - shape (det, featches)
 
@@ -109,9 +106,16 @@ def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None,
             # have start token
             fake = fake[1:]
         fake, fake_lenght = clean_mask(fake, tokens = tokens, lenght=real_lenght)
-    names = ['det x', 'det y', 'det z', 'signal', 'flat front', '(real - front)']
+    if real_time:
+        names = ['det x', 'det y', 'det z', 'signal', 'real time front']
+    else:
+        names = ['det x', 'det y', 'det z', 'signal', 'flat front', '(real - front)']
     fig, axs = plt.subplots(2,3, figsize = (10,10))
-    for i in range(6):
+    if real_time:
+        n_chanales = 5
+    else:
+        n_chanales = 6
+    for i in range(n_chanales):
         row = i%2
         col = i//2
         axs[row][col].plot(fake.to('cpu').detach().numpy()[:,i], 'r')
@@ -124,30 +128,35 @@ def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None,
     return fig
 
 
-# Tresh
-    # Unneded
-# def choise_def_particles_2(self, name: List[str],data, ev_starts, mc_params, par_num: int = 1, get_mc_params: bool = False):
-#     mass = self.str2mass(name)
-#     data_shape = list(data.shape)
-#     data_shape[0]=0
-#     data_shape=tuple(data_shape)
-#     data_new = torch.zeros(data_shape, dtype=data.dtype, device=data.device)
-#     ev_starts_new = torch.tensor([0], dtype=torch.long)
-#     if get_mc_params:
-#         mc_params_shape = list(mc_params.shape)
-#         mc_params_shape[0]=0
-#         mc_params_shape=tuple(mc_params_shape)
-#         mc_params_new = torch.zeros(mc_params_shape, dtype=mc_params.dtype, device=mc_params.device)
-#     for i in tqdm(range(len(mc_params))):
-#         p=mc_params[i,par_num]
-#         if p in mass:
-#             ev_s = ev_starts[i]
-#             ev_f = ev_starts[i+1]
-#             data_new = torch.concat([data_new, data[ev_s:ev_f]], dim=0)
-#             ev_starts_new = torch.concat([ev_starts_new, torch.tensor([ev_f-ev_s], dtype=torch.long)])
-#             if get_mc_params:
-#                 mc_params_new = torch.concat([mc_params_new, mc_params[i]], dim=1)
-#     if get_mc_params:
-#         return data_new, ev_starts_new, mc_params_new
-#     else:
-#         return data_new, ev_starts_new
+def MCPAR_index2srt(ind:int):
+    mc_parameters_dict = {
+    0: "mc_event_num",
+    1: "mc_parttype (CORSIKA, 1 - gamma, 14 - proton, 5626 - Fe)",
+    2: "mc_corecounter (closest to core detector number)",
+    3: "mc_E (for primaries other than photon, energy is rescaled by 1/1.27, i.e., to proton FD energy scale)",
+    4: "mc_theta",
+    5: "mc_phi",
+    6: "mc_height_1st_inter (km)",
+    7: "mc_xcore",
+    8: "mc_ycore",
+    9: "mc_border_distance (km)"
+    }
+    return mc_parameters_dict[ind]
+
+def draw_logvar_mu(logvar: List[torch.Tensor], mu: List[torch.Tensor], particles:List[str]) -> plt.figure:
+    fig, axs = plt.subplots(2,1, figsize = (10,20))
+    for particle in range(len(logvar)):
+        std = mu[particle].std(axis=0)
+        mean = mu[particle].mean(axis=0)
+        axs[0].errorbar(np.arange(std.shape[0]), mean, std, label=particle, capsize=7)
+        std = logvar[particle].std(axis=0)
+        mean = logvar[particle].mean(axis=0)
+        axs[1].errorbar(np.arange(std.shape[0]), mean, std, label=particle, capsize=7)
+
+    axs[0].legend()
+    axs[1].legend()
+    axs[0].grid()
+    axs[0].set_title(f'Распределение латеного пространства {particle}' )
+    axs[1].grid()
+    axs[1].set_title(f'Распределение log-var пространства {particle}' )
+    return fig
