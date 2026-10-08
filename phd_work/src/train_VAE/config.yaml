@@ -1,12 +1,34 @@
 mode: Latent
-input_dim: 6
+input_dim: 5
 hidden_dim: 64
-latent_dim: 8
+latent_dim: 6
 num_layers: 4
 batch_size: 150
 lr: 1e-4
-epoches: 30
+epoches: 100
 lstm2: False
+recos_in_latten: True
+make_real_time: True
+reduce_grid: False
+th_num_det: 0
+index_recos:
+ - 3
+  # - 3
+  # - 4
+  # - 5
+  # - 6
+  # - 7
+  # - 8
+  # - 9
+  # - 10
+  # - 11
+  # - 12
+  # - 13
+  # - 14
+
+  # - 0 # theta
+  # - 2 # S_800
+  # - 6 # Linsley front curvature
 reconstruction_params: 
     # mc_params (num_evs,10):
     # 0. mc_event_num
@@ -26,8 +48,7 @@ reconstruction_params:
 #data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_14yr_e1_0110_excl_sat_F_excl_geo_F.h5'
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_fe_q4_e1_0110_excl_sat_F_excl_geo_F.h5'
 # data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_F_excl_geo_F.h5'
-# data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_T_excl_geo_T_one_work.h5'
-# data_path: '/home3/ivkhar/TA/data/MC/normed/gamma_search/pr_ga_all_0001_eq_eff_normed.h5'
+#data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_photon_0001_excl_sat_T_excl_geo_T_one_work.h5'
 data_path: '/home3/rfit/Telescope_Array/phd_work/data/normed/Ivan_Kharuk_pr_ga_all_0001_eq_eff_normed_one_work.h5'
 #for masking in dataloade
 padding_value: -11.0
@@ -56,14 +77,14 @@ paticles:
   # т.е. чтобы было фотонов в 10 раз меньше train_probability для них 0.2
   train_probability:
     - 1.0
-    - 0.01
+    - 0.0
 
-koef_loss: [0,0,0,1,1,1]
+koef_loss: [0,0,0,1,1]
 denoise_koef: 0.05
 split_num: 10000
 exp: AutoEncoder3
 use_mask: True
-PATH: info_Transfoemr_Kharuk_one_work_photon_0.01_FullyConnected_4
+PATH: Original_VAE_dim_5_norm__ENERGY_IN_LATTENT
 save_model_path: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder
 show_index:
   - 1
@@ -72,5 +93,5 @@ show_index:
 write_param:
   # - 'hidden_dim'
   - 'paticles'
-chpt: None #/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/info_Transfoemr_MMD_0.05_KL_0.01_new_MMD2_MMD_KL_0/best
+chpt: None #/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Original_VAE_dim_5_norm_0.0_photon_add_recos/last
 # chpt: /home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Encoder_2Transformer_CLS/best

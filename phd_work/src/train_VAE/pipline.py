@@ -16,6 +16,7 @@ print('Using device:', device)
 import model as Model
 import datasets as DataSet
 import loss as Loss
+import sys
 from typing import Optional, Tuple, Union
 
 from torch.utils.tensorboard import SummaryWriter
@@ -75,6 +76,7 @@ class Pipline():
         writer.add_text('hparams',  str(config))
         kwargs = DataSet.get_params_mask(config)
         kwargs['mc_params'] = True
+        kwargs['th_num_det'] = config['th_num_det']
         collate_fn = DataSet.wrapper_mask(DataSet.collate_fn_many_args, **kwargs)
         if need_train_DS:
             dataset = DataSet.VariableLengthDataset(config['data_path'], 'train',
@@ -84,7 +86,10 @@ class Pipline():
                                                     change_coordinat = config["change_coordinat"],
                                                     change_sort = config['change_sort'],
                                                     probability = config['paticles']['train_probability'],
-                                                    recos=True)
+                                                    recos=True,
+                                                    make_real_time=config['make_real_time'],
+                                                    reduce_grid = config['reduce_grid'],
+                                                    )
             train_loader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
         else:
             dataset = None
@@ -98,7 +103,10 @@ class Pipline():
                                                             reconstruction_params=config['reconstruction_params'],
                                                             change_coordinat=config.get("change_coordinat", False),
                                                             change_sort=config.get('change_sort', False),
-                                                            recos=True)
+                                                            recos=True,
+                                                            make_real_time=config['make_real_time'],
+                                                            reduce_grid = config['reduce_grid'],
+                                                            )
                 val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
                 val_loaders.append(val_loader)
         else:
@@ -108,7 +116,10 @@ class Pipline():
                                                         reconstruction_params=config['reconstruction_params'],
                                                         change_coordinat=config.get("change_coordinat", False),
                                                         change_sort=config.get('change_sort', False),
-                                                        recos=True)
+                                                        recos=True,
+                                                        make_real_time=config['make_real_time'],
+                                                        reduce_grid = config['reduce_grid'],
+                                                        )
             val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=collate_fn)
             val_loaders = [val_loader]        
         start_token = kwargs['start_token'].to(device)
@@ -119,6 +130,8 @@ class Pipline():
                           reconstruction_params = config['reconstruction_params'],
                           reparameterize_koef = config['reparameterize_koef'],
                           denoise_koef = config['denoise_koef'],
+                          recos_in_latten = config['recos_in_latten'],
+                          index_recos = config['index_recos'],
                           ).to(device)
         if config['chpt'] != 'None':
             model.load(config['chpt'])
@@ -128,6 +141,10 @@ class Pipline():
         # optimizer = optim.Adam(model.parameters(), lr=float(config['lr']))
         optimizer = optim.AdamW(model.encoder.parameters(), lr=float(config['lr']))
         optimizer_decoder = optim.AdamW(model.decoder.parameters(), lr=float(config['lr']))
+        if dataset is not None:
+            self.norm_params = dataset.norm_param
+        else:
+            self.norm_params = val_dataset.norm_param
         # write augmentes
         self.optimizer = optimizer
         self.optimizer_decoder = optimizer_decoder
@@ -200,17 +217,18 @@ class Pipline():
             self.model.train()
             pbar = tqdm(self.train_loader, desc =f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: 0.0")
             koef_KL = self.koef_KL[epoch]
-            for x, part, params_CR, recos in pbar:  # x должен быть пакетом последовательностей с заполнением
+            for x, part, params_CR, recos, padded_sequences_SR in pbar:  # x должен быть пакетом последовательностей с заполнением
                 # x- data
                 # part - promt mc_params in h5(look dataset.py)
                 # params_CR by reconstruction index
-
                 x = x.to(device)
                 part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                 params_CR = params_CR.to(device) 
+                recos = recos.to(device)
+                padded_sequences_SR = padded_sequences_SR.to(device)
                 self.optimizer.zero_grad()
                 self.optimizer_decoder.zero_grad()
-                recon_x, mu, log_var, pred_num, recon_pred = self.model(x)
+                recon_x, mu, log_var, pred_num, recon_pred = self.model(x, recos, padded_sequences_SR)
                 recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
                                                                                     recon_pred,
                                                                                     params_CR, 
@@ -356,14 +374,17 @@ class Pipline():
         preds_log_var = np.zeros((0,self.config['latent_dim']))
         preds_num_det = np.zeros((0, 1))
         mmd_loss_list = []
-        for x, part, params_CR, recos in pbar_val:  # x should be a batch of sequences with padding
+        for x, part, params_CR, recos, padded_sequences_SR in pbar_val:  # x should be a batch of sequences with padding
             num_examples += x.size(0)
 
             with torch.no_grad():
+                recos = recos.to(device)
                 x = x.to(device)
                 part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                 params_CR = params_CR.to(device) 
-                recon_x, mu, log_var, pred_num, recon_pred = model(x)
+
+                padded_sequences_SR = padded_sequences_SR.to(device)
+                recon_x, mu, log_var, pred_num, recon_pred = model(x, recos, padded_sequences_SR)
                 recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
                                                                                         recon_pred,
                                                                                         params_CR, 
@@ -414,7 +435,7 @@ class Pipline():
         for ii in range(len(self.show_index)):
             # get from back side
             i = -ii
-            fig = show_pred(real[i], fake[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = num[i])
+            fig = show_pred(real[i], fake[i], tokens = (self.start_token, self.stop_token, self.mask), lenght_predict = num[i], real_time=self.config['make_real_time'])
             self.writer.add_figure(f"val/show_pred_{ii}/{particle}", fig, epoch)
         
         if reduce_loss_per_event:
@@ -451,14 +472,14 @@ class Pipline():
             num_det_list = np.concatenate((num_det_list, num_det))
         return num_det_list
 
-    def test(self, model_path: str = None):
+    def test(self, model_path: str = None, path_save: str = None):
         """
         Тестируем модель. Смотрим на разделение частиц по функции ошибок
 
         1 - строим графики в зависимости от кол-ва детекторов в событии
         2 - записываем латеные представления, ошики и кол-во детекторов в событии в csv файл
         """
-        path_save = '/home/rfit/Telescope_Array/phd_work/src/train_VAE/info_Transfoemr_Kharuk_one_work_photon_0.01_FullyConnected_4'
+        path_save = path_save if path_save is not None else '/home/rfit/Telescope_Array/phd_work/src/train_VAE/Original_VAE_dim_5_norm_0.0_photon_add_recos_CONT'
         model = self.model
         if model_path is not None:
             model.load(model_path)
@@ -480,18 +501,24 @@ class Pipline():
             preds_num_det = np.zeros((0, 1))
             mmd_loss_list = np.zeros(0)
             recos_list = []
+            reconstruction_data_list = []
+            original_data_list = []
             particle = self.config['paticles']['test'][i]
             path = os.path.join(path_save, particle)
             os.makedirs(path, exist_ok=True)
             with torch.no_grad():
-                for x, part, params_CR, recos in tqdm(val_loader):  # x should be a batch of sequences with padding
+                for x, part, params_CR, recos, padded_sequences_SR in tqdm(val_loader):  # x should be a batch of sequences with padding
                 
                     x = x.to(device)
+                    recos = recos.to(device)
                     part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                     params_CR = params_CR.to(device) 
+                    padded_sequences_SR = padded_sequences_SR.to(device)
                     num_det = Loss.calc_det(x,self.mask,use_mask=False).to('cpu').detach().numpy()
                     num_det_list = np.concatenate((num_det_list, num_det), axis=0)
-                    recon_x, mu, log_var, pred_num, recon_pred = model(x)
+
+                    recon_x, mu, log_var, pred_num, recon_pred = model(x, recos, padded_sequences_SR)
+                    print('shape for SR', padded_sequences_SR.shape, x.shape)
                     recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
                                                                                             recon_pred,
                                                                                             params_CR, 
@@ -502,7 +529,16 @@ class Pipline():
                                                                                             reduce_loss_per_event=True,
 
                                                                                             )
+                    recos = recos.to('cpu')
                     recos_list.append(recos)
+                    for i in range(len(recon_x)):
+                        num = num_det[i]
+                        reconstruction_data = recon_x[i].to('cpu').detach().numpy().reshape(-1, 5)
+                        reconstruction_data = reconstruction_data[1:num+1]
+                        reconstruction_data_list.append(reconstruction_data)
+                        original_data = x[i].to('cpu').detach().numpy()
+                        original_data = original_data[1:num+1]
+                        original_data_list.append(original_data)
                     embading = np.concatenate((embading, mu.cpu().detach().numpy()), axis=0)
                     preds_log_var = np.concatenate((preds_log_var, log_var.cpu().detach().numpy()), axis=0)
                     preds_num_det = np.concatenate((preds_num_det, pred_num.cpu().detach().numpy()), axis=0)
@@ -519,6 +555,8 @@ class Pipline():
                 np.save(os.path.join(path, mode, f'preds_log_var.npy'), preds_log_var)
                 np.save(os.path.join(path, mode, f'preds_num_det.npy'), preds_num_det)
                 np.save(os.path.join(path, mode, f'recos.npy'), np.concatenate(recos_list, axis=0))
+                np.save(os.path.join(path, mode, f'reconstruction_data.npy'), np.array(reconstruction_data_list))
+                np.save(os.path.join(path, mode, f'original_data.npy'), np.array(original_data_list))
     def predict(self, test_loader, i, 
         NoneLoss: bool = False, 
         ):
@@ -540,12 +578,13 @@ class Pipline():
         dict_info = {}
         with torch.no_grad():
             # for i, test_loader in enumerate(test_loaders):
-            for x, part, params_CR, *_ in tqdm(test_loader):
+            for x, part, params_CR, recos in tqdm(test_loader):
+                recos = recos.to(device)
                 x = x.to(device)
                 part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                 params_CR = params_CR.to(device)
                 mu, log_var, (h_n, c_n) = model.encoder(x)
-                recon_x, mu, log_var, pred_num, pred_mass = model(x)
+                recon_x, mu, log_var, pred_num, pred_mass = model(x, recos)
                 if not(NoneLoss):
                     # Можно использовать если понадобятся другие лоссы
                     recon_loss, kl_divergence, num_det_loss, mass_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, params_CR, part,
@@ -598,7 +637,8 @@ if __name__ == "__main__":
     elif args.mode == 'test':
         pipline = Pipline(config, need_train_DS=False)
         print('TEST PIPLINE')
-        pipline.test(model_path='/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/info_Transfoemr_Kharuk_one_work_photon_0.01_FullyConnected_4/last')
+        save_path = '/home/rfit/Telescope_Array/phd_work/src/train_VAE/Original_VAE_dim_5_norm__ENERGY_IN_LATTENT'
+        pipline.test(model_path='/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Original_VAE_dim_5_norm__ENERGY_IN_LATTENT/last', path_save=save_path)
     elif args.mode == 'latent':
         pipline = Pipline(config, need_train_DS=False)
         print('Latent PIPLINE')

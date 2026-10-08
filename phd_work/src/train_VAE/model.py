@@ -571,11 +571,261 @@ class Encoder_Transformer(nn.Module):
     def load(self, path):
         if path is not None:
             self.load_state_dict(torch.load(path))
+class CLSCrossAttentionBlock(nn.Module):
+    """
+    Блок, который обновляет только CLS/state token.
+
+    Вход:
+        x:    [B, N, D]
+        mask: [B, N], где True = padding/stop token, False = реальный токен
+
+    Выход:
+        x: [B, N, D], где x[:, 0:1] обновлен, а x[:, 1:] оставлены как были.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        nhead: int = 4,
+        dim_feedforward: int = 512,
+        dropout: float = 0.1,
+        activation: str = "relu",
+        norm_first: bool = False,
+    ):
+        super().__init__()
+
+        self.norm_first = norm_first
+
+        self.norm_cls_1 = nn.LayerNorm(hidden_dim)
+        self.norm_tokens = nn.LayerNorm(hidden_dim)
+
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=nhead,
+            dropout=dropout,
+            batch_first=True,
+        )
+
+        self.dropout_attn = nn.Dropout(dropout)
+
+        self.norm_cls_2 = nn.LayerNorm(hidden_dim)
+
+        if activation == "relu":
+            act = nn.ReLU()
+        elif activation == "gelu":
+            act = nn.GELU()
+        else:
+            raise ValueError(f"Unsupported activation: {activation}")
+
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_dim, dim_feedforward),
+            act,
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, hidden_dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x, key_padding_mask=None):
+        """
+        key_padding_mask:
+            [B, N], True = игнорировать токен в attention.
+        """
+
+        cls = x[:, 0:1, :]      # [B, 1, D]
+        tokens = x              # [B, N, D]
+
+        # ВАЖНО:
+        # CLS не должен быть замаскирован, даже если в исходных данных первый токен похож на stop/pad.
+        if key_padding_mask is not None:
+            key_padding_mask = key_padding_mask.clone()
+            key_padding_mask[:, 0] = False
+
+        if self.norm_first:
+            # Pre-LN вариант
+            cls_norm = self.norm_cls_1(cls)
+            tokens_norm = self.norm_tokens(tokens)
+
+            attn_out, _ = self.cross_attn(
+                query=cls_norm,
+                key=tokens_norm,
+                value=tokens_norm,
+                key_padding_mask=key_padding_mask,
+                need_weights=False,
+            )
+
+            cls = cls + self.dropout_attn(attn_out)
+            cls = cls + self.mlp(self.norm_cls_2(cls))
+
+        else:
+            # Post-LN вариант, ближе к твоему TransformerEncoderLayer(norm_first=False)
+            attn_out, _ = self.cross_attn(
+                query=cls,
+                key=tokens,
+                value=tokens,
+                key_padding_mask=key_padding_mask,
+                need_weights=False,
+            )
+
+            cls = self.norm_cls_1(cls + self.dropout_attn(attn_out))
+            cls = self.norm_cls_2(cls + self.mlp(cls))
+
+        # Обычные токены остаются ТОЧНО такими же, как после первых 2 transformer-слоев
+        out = torch.cat([cls, x[:, 1:, :]], dim=1)
+
+        return out
+class Encoder_Kharuk_idia(nn.Module):
+    """
+    Энкодер VAE на базе Transformer.
+
+    Идея:
+        1. input -> embedding
+        2. 2 обычных TransformerEncoderLayer обновляют все токены
+        3. несколько CLSCrossAttentionBlock обновляют только CLS
+        4. по CLS строим mu и log_var
+    """
+
+    def __init__(
+        self,
+        input_dim=6,
+        hidden_dim=64,
+        latent_dim=16,
+        num_layers=4,
+        num_base_transformer_layers=2,
+        num_cls_update_layers=2,
+        nhead=4,
+        dim_feedforward=512,
+        dropout=0.1,
+        **kwargs,
+    ):
+        super().__init__()
+
+        self.config = kwargs
+
+        self.stop_token = kwargs["stop_token"]
+        self.padding_value = kwargs["padding_value"]
+
+        self.embading = nn.Linear(input_dim, hidden_dim)
+
+        base_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation="relu",
+            layer_norm_eps=1e-5,
+            batch_first=True,
+            norm_first=False,
+        )
+
+        self.TransformerEncoder = nn.TransformerEncoder(
+            base_layer,
+            num_layers=num_base_transformer_layers,
+        )
+
+        self.cls_update_layers = nn.ModuleList([
+            CLSCrossAttentionBlock(
+                hidden_dim=hidden_dim,
+                nhead=nhead,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation="relu",
+                norm_first=False,
+            )
+            for _ in range(num_cls_update_layers)
+        ])
+
+        self.fc1 = nn.Linear(hidden_dim, 32)
+
+        self.fc_mu = nn.Linear(32, latent_dim)
+        self.fc_logvar = nn.Linear(32, latent_dim)
+
+        self.activation = nn.LeakyReLU()
+
+    def get_mask(self, x, stop_token=None, padding_value=None):
+        """
+        Возвращает mask: [B, N]
+        True  = служебный токен, который надо игнорировать
+        False = реальный токен
+
+        x: [B, N, input_dim]
+        """
+
+        if stop_token is None:
+            stop_token = torch.tensor(
+                self.stop_token,
+                dtype=x.dtype,
+                device=x.device,
+            )
+
+        if padding_value is None:
+            padding_value = torch.tensor(
+                self.padding_value,
+                dtype=x.dtype,
+                device=x.device,
+            )
+
+        mask = torch.zeros(
+            x.shape[:2],
+            dtype=torch.bool,
+            device=x.device,
+        )
+
+        first_feature = x[:, :, 0]
+
+        mask = mask | (first_feature == stop_token)
+        mask = mask | (first_feature == padding_value)
+
+        # Первый токен считаем CLS и никогда не маскируем
+        mask[:, 0] = False
+
+        return mask
+
+    def forward(self, x):
+        """
+        x: [B, N, input_dim]
+        """
+
+        mask = self.get_mask(x)
+
+        real_lenght = mask.size(1) - mask.sum(dim=1)
+
+        x = self.embading(x)
+
+        # 1) Обычные transformer-слои:
+        # здесь обновляются все токены
+        x = self.TransformerEncoder(
+            x,
+            src_key_padding_mask=mask,
+        )
+
+        # 2) CLS cross-attention слои:
+        # здесь обновляется только x[:, 0],
+        # остальные токены остаются неизменными
+        for layer in self.cls_update_layers:
+            x = layer(
+                x,
+                key_padding_mask=mask,
+            )
+
+        CLS = x[:, 0, :]
+
+        z = self.fc1(CLS)
+        z = self.activation(z)
+
+        mu = self.fc_mu(z)
+        log_var = self.fc_logvar(z)
+
+        return mu, log_var, (real_lenght, real_lenght)
+
+    def load(self, path):
+        if path is not None:
+            self.load_state_dict(torch.load(path))
 class DecoderFullyConnected(nn.Module):
-    def __init__(self, latent_dim, hidden_size, output_size, coord_dim=3, **kwargs):
+    def __init__(self, latent_dim, hidden_size, output_size, coord_dim=3, index_recos=None, **kwargs):
         super().__init__()
         self.output_size = output_size
-        self.input_dim = latent_dim + coord_dim + 1
+        self.index_recos = index_recos if index_recos is not None else []
+        self.input_dim = latent_dim + coord_dim + 1 + len(self.index_recos)
         self.latent_to_detector = nn.Sequential(
             nn.Linear(self.input_dim, 64),
             nn.LeakyReLU(),
@@ -590,16 +840,6 @@ class DecoderFullyConnected(nn.Module):
             nn.Linear(64, 32),
             nn.LeakyReLU(),
             nn.Linear(32, output_size),
-                # nn.LeakyReLU(),
-                # nn.Linear(hidden_size, hidden_size*2),
-            # nn.LeakyReLU(),
-            # nn.Linear(hidden_size*2, hidden_size*8),
-            # nn.LeakyReLU(),
-            # nn.Linear(hidden_size*8, hidden_size*2),
-            # nn.LeakyReLU(),
-            # nn.Linear(hidden_size*2, hidden_size),
-            # nn.LeakyReLU(),
-            # nn.Linear(hidden_size, output_size)
         )
     def forvard_one_detector(self, z):
         return self.latent_to_detector(z)
@@ -717,12 +957,16 @@ class VAE(nn.Module):
                  reparameterize_koef: float = 1.0,
                  num_layers_decoder:int = 1,
                  denoise_koef: float = 0.0,
+                 index_recos: list = [],
+                 recos_in_latten: bool = True,
                  **kwargs ) -> None:
         super(VAE, self).__init__()
         self.denoise_koef = denoise_koef
         self.TRANSFORMER = True
         self.reparameterize_koef = reparameterize_koef
         self.padding_value = kwargs.get('padding_value', None)
+        self.index_recos = index_recos
+        self.recos_in_latten = recos_in_latten
         if CLS_token == 'trainable':
             self.CLS_token = torch.nn.Parameter(
                                 start_token.unsqueeze(0))
@@ -731,9 +975,11 @@ class VAE(nn.Module):
         if self.TRANSFORMER:
 
         # self.encoder = Encoder(input_dim, hidden_dim, latent_dim, lstm2=lstm2, lstm3=lstm3 )
-            self.encoder = Encoder_Transformer(input_dim, hidden_dim, latent_dim,
-                                                num_layers=num_layers, **kwargs)
-            self.decoder = DecoderFullyConnected(latent_dim, hidden_dim_decoder, input_dim)
+            # self.encoder = Encoder_Transformer(input_dim, hidden_dim, latent_dim,
+            #                                     num_layers=num_layers, **kwargs)
+            self.encoder = Encoder_Kharuk_idia(input_dim, hidden_dim, latent_dim,
+                                                num_layers=2,num_base_transformer_layers=2,num_cls_update_layers=2, **kwargs)
+            self.decoder = DecoderFullyConnected(latent_dim, hidden_dim_decoder, input_dim, index_recos=self.index_recos)
             # self.decoder = DecoderTransformerSimple(latent_dim, hidden_dim_decoder, input_dim,
             #                                         max_len = 100,
             #                                         num_layers=num_layers_decoder)
@@ -775,7 +1021,14 @@ class VAE(nn.Module):
         x[:,:,4:5] += noise_flat
         x[:,:,5:6] += noise_real
         return x
-    def forward(self, x):
+    def forward(self, x, recos, padded_sequences_SR):
+        '''padded_sequences_SR для супер разрешения. Может быть None. Он подается в энкодер только
+        '''
+
+        coordinates_x = x[:,:,:3]
+        if padded_sequences_SR is not None:
+            x = padded_sequences_SR
+        
         seq_len = x.size(1)
         # change start token on CLS token
 
@@ -800,7 +1053,13 @@ class VAE(nn.Module):
 
             # Репараметризация для VAE
             z = self.reparameterize(mu, log_var, koef=self.reparameterize_koef)
-            recon_x, _, num, mass = self.decoder(z, real_lenght, x[:,:,:3])
+
+            # ADD RECOS TO LATTEN
+            if self.recos_in_latten:
+                index_recos = self.index_recos
+                z = torch.cat((z, recos[:, index_recos]), dim=1)
+                #z = recos[:, index_recos] # TODO() Убрать . Это только для проверки
+            recon_x, _, num, mass = self.decoder(z, real_lenght, coordinates_x)
         else:
             mu, log_var, (real_lenght, _) = self.encoder(x, lengths=lengths)
 
@@ -820,10 +1079,26 @@ class VAE(nn.Module):
 if __name__ == "__main__":
     model = VAE(stop_token=-11, padding_value=-10, num_layers_decoder = 1)
     x=torch.randn(2,10,6)
-    print('input shape:', x.shape)
-    res = model(x)
-    print('recon shape:', res[0].shape)
-    print('mu shape:', res[1].shape)
-    print('log_var shape:', res[2].shape)
-    print('num shape:', res[3].shape)
-    print('mass shape:', res[4].shape)
+    # recos = torch.randn(2,10,6)
+    # print('input shape:', x.shape)
+
+    # print('recos shape:', recos.shape)
+    # res = model(x, recos)
+    # print('recon shape:', res[0].shape)
+    # print('mu shape:', res[1].shape)
+    # print('log_var shape:', res[2].shape)
+    # print('num shape:', res[3].shape)
+    # print('mass shape:', res[4].shape)
+
+
+    # show weight
+    # model.load_state_dict(torch.load('/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Test_Recos_VAE/last'))
+    weights = torch.load('/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Test_Recos_VAE/last',)
+    for k, v in weights.items():
+        
+        if 'decoder' in k:
+            print(k)
+    first_weight = weights['decoder.latent_to_detector.0.weight']
+    print(first_weight.shape)
+    print(first_weight.mean(dim=0))
+    print(first_weight.std(dim=0))

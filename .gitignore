@@ -35,3 +35,4 @@ phd_work/Models
 phd_work/src/train_VAE/hists/
 
 *.tsv
+*events.out.tfevents

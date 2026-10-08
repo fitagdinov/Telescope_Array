@@ -127,7 +127,8 @@ def test(h5_in, h5_out):
             print('test', key, np.array(test[key][()]).shape)
 if __name__ == '__main__':
 
-    h5_out = '/home3/rfit/Telescope_Array/phd_work/data/normed/Ivan_Kharuk_pr_ga_all_0001_eq_eff_normed_one_work.h5'
-    h5_in = '/home3/ivkhar/TA/data/MC/normed/gamma_search/pr_ga_all_0001_eq_eff_normed.h5'
+    # h5_out = '/home3/rfit/Telescope_Array/phd_work/data/normed/prhenife_q4_1745_14yr_0110_bundled_normed_one_work.h5'
+    h5_in = '/home3/rfit/Telescope_Array/phd_work/data/normed/pr_q4_1895_no_sat_no_geo_0110_bundled.h5'
+    h5_out = h5_in.replace('.h5', '_one_work.h5')
     main(h5_in, h5_out)
     test(h5_in, h5_out)

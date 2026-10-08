@@ -84,7 +84,7 @@ def clean_mask(data: torch.Tensor, tokens: Optional[Tuple[int, int, int]] =None,
     return data[:lenght], lenght   
     
 def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None,
-               lenght_predict: Union[np.ndarray, torch.Tensor] = None) -> plt.figure:
+               lenght_predict: Union[np.ndarray, torch.Tensor] = None, real_time: bool = False) -> plt.figure:
     '''
     data - shape (det, featches)
 
@@ -106,9 +106,16 @@ def show_pred(data, fake, tokens: Optional[Tuple[int, int, int]]=None,
             # have start token
             fake = fake[1:]
         fake, fake_lenght = clean_mask(fake, tokens = tokens, lenght=real_lenght)
-    names = ['det x', 'det y', 'det z', 'signal', 'flat front', '(real - front)']
+    if real_time:
+        names = ['det x', 'det y', 'det z', 'signal', 'real time front']
+    else:
+        names = ['det x', 'det y', 'det z', 'signal', 'flat front', '(real - front)']
     fig, axs = plt.subplots(2,3, figsize = (10,10))
-    for i in range(6):
+    if real_time:
+        n_chanales = 5
+    else:
+        n_chanales = 6
+    for i in range(n_chanales):
         row = i%2
         col = i//2
         axs[row][col].plot(fake.to('cpu').detach().numpy()[:,i], 'r')

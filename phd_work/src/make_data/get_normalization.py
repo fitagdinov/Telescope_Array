@@ -1,11 +1,12 @@
 import numpy as np
 import h5py as h5
-
+import os
 use_wf_16 = True
-h5_in = 'pr_photon_0001_excl_sat_T_excl_geo_T_plus_bdt_params.h5'
-h5f = '/home3/rfit/Telescope_Array/phd_work/data/bundled/' + h5_in
+h5_in = 'pr_q4_1895_no_sat_no_geo_0110_bundled.h5'
+h5f = '/home3/rfit/Telescope_Array/phd_work/data/extraEnergy'
+h5f = os.path.join(h5f, h5_in)
 num_evs = 200000
-keys_evs = ['recos','det_max_params'] # det_max_wf
+keys_evs = ['recos'] # det_max_wf
 keys_hits = ['dt_params',] # wfs_flat
 
 with h5.File(h5f,'a') as hf:
