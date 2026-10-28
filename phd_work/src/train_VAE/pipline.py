@@ -132,6 +132,7 @@ class Pipline():
                           denoise_koef = config['denoise_koef'],
                           recos_in_latten = config['recos_in_latten'],
                           index_recos = config['index_recos'],
+                          koef_for_encoder = config['adversarial_block']['koef_for_encoder'] if config['adversarial_block']['used'] else 0,
                           ).to(device)
         if config['chpt'] != 'None':
             model.load(config['chpt'])
@@ -141,6 +142,7 @@ class Pipline():
         # optimizer = optim.Adam(model.parameters(), lr=float(config['lr']))
         optimizer = optim.AdamW(model.encoder.parameters(), lr=float(config['lr']))
         optimizer_decoder = optim.AdamW(model.decoder.parameters(), lr=float(config['lr']))
+        optimizer_adversarial = optim.AdamW(model.reco_from_latent.parameters(), lr=float(config['lr']))
         if dataset is not None:
             self.norm_params = dataset.norm_param
         else:
@@ -148,6 +150,7 @@ class Pipline():
         # write augmentes
         self.optimizer = optimizer
         self.optimizer_decoder = optimizer_decoder
+        self.optimizer_adversarial = optimizer_adversarial
         self.train_loader = train_loader
         self.model = model
         self.writer = writer
@@ -155,6 +158,8 @@ class Pipline():
         self.metric_lattent = LatentMetric(num_split=int(config['split_num']))
         self.metric_divide = DivedeMetrics(num_split=int(config['split_num']))
         self.metric_f1_best = 0
+        self.koef_for_encoder = config['adversarial_block']['koef_for_encoder'] if config['adversarial_block']['used'] else 0
+        self.adversarial_loss = Loss.adversarial_loss
         return {'train_loader': train_loader, 'val_loaders': val_loaders, 'model': model, 'optimizer': optimizer, 'writer': writer}
     def load_chpt(self, chpt_path: str):
         """
@@ -215,7 +220,7 @@ class Pipline():
             print('lr_scheduler', self.optimizer.param_groups[0]['lr'])
             self.writer.add_scalar("lr_scheduler", self.optimizer.param_groups[0]['lr'], epoch)
             self.model.train()
-            pbar = tqdm(self.train_loader, desc =f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: 0.0")
+            pbar = tqdm(self.train_loader, desc =f"TRAIN exp:{self.config['PATH']} Epoch {epoch + 1}/{self.epochs}, Loss: 0.0")
             koef_KL = self.koef_KL[epoch]
             for x, part, params_CR, recos, padded_sequences_SR in pbar:  # x должен быть пакетом последовательностей с заполнением
                 # x- data
@@ -228,7 +233,8 @@ class Pipline():
                 padded_sequences_SR = padded_sequences_SR.to(device)
                 self.optimizer.zero_grad()
                 self.optimizer_decoder.zero_grad()
-                recon_x, mu, log_var, pred_num, recon_pred = self.model(x, recos, padded_sequences_SR)
+                self.optimizer_adversarial.zero_grad()
+                recon_x, mu, log_var, pred_num, recon_pred, pred_recos = self.model(x, recos, padded_sequences_SR)
                 recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
                                                                                     recon_pred,
                                                                                     params_CR, 
@@ -243,15 +249,20 @@ class Pipline():
                 recon_params_loss *= self.koef_mass
                 mmd_loss *= self.koef_MMD
                 loss = recon_loss + kl_divergence + num_det_loss + torch.mean(recon_params_loss) + mmd_loss
+                # При нулевом koef энкодер не штрафуется: это обычный InfoVAE, recon + MMD.
+                if pred_recos is not None:
+                    adversarial_loss = self.adversarial_loss(pred_recos, recos[:, self.config['index_recos']]).mean()
+                    loss = loss + adversarial_loss
+                    self.writer.add_scalar("train/adversarial_loss", adversarial_loss, iters)
                 self.writer.add_scalar("train/Loss", loss, iters)
                 self.writer.add_scalar("train/KL_loss", kl_divergence, iters)
                 self.writer.add_scalar("train/recon_loss", recon_loss, iters)
                 self.writer.add_scalar("train/num_det_loss", num_det_loss, iters)
                 self.writer.add_scalar("train/mmd_loss", mmd_loss, iters)
-                
                 loss.backward()
                 self.optimizer.step()
                 self.optimizer_decoder.step()
+                self.optimizer_adversarial.step()
                 pbar.set_description(f"TRAIN Epoch {epoch + 1}/{self.epochs}, Loss: {loss.item():.4f}")
                 iters += 1
             self.writer.add_scalar("train/koef_KL", koef_KL, epoch)
@@ -288,7 +299,7 @@ class Pipline():
         num_det_list = {}
         for i, val_loader in enumerate(val_loaders):
             particle = self.config['paticles']['test'][i]
-            loss, KL, recon, num_det, embading, preds_log_var, preds_num_det, mmd_loss_list = self.validation_step(epoch=epoch, 
+            loss, KL, recon, num_det, embading, preds_log_var, preds_num_det, mmd_loss_list, adv_loss = self.validation_step(epoch=epoch, 
                                                                     val_loader=val_loader, 
                                                                     model=model,
                                                                     koef_KL=koef_KL, 
@@ -312,6 +323,7 @@ class Pipline():
             self.writer.add_scalar(f"val/recon_loss/all/{particle}", recon.mean(), epoch)
             self.writer.add_scalar(f"val/num_det_loss/{particle}", num_det.mean(), epoch)
             self.writer.add_scalar(f"val/mmd_loss_list/{particle}", mmd_loss_list.mean(), epoch)
+            self.writer.add_scalar(f"val/adversarial_loss/{particle}", adv_loss.mean(), epoch)
             #draw logvar and mu
         fig = draw_logvar_mu(list(preds_log_var_dict.values()), 
                             list(embading_dict.values()), 
@@ -374,6 +386,7 @@ class Pipline():
         preds_log_var = np.zeros((0,self.config['latent_dim']))
         preds_num_det = np.zeros((0, 1))
         mmd_loss_list = []
+        adversarial_loss_mean = []
         for x, part, params_CR, recos, padded_sequences_SR in pbar_val:  # x should be a batch of sequences with padding
             num_examples += x.size(0)
 
@@ -384,7 +397,7 @@ class Pipline():
                 params_CR = params_CR.to(device) 
 
                 padded_sequences_SR = padded_sequences_SR.to(device)
-                recon_x, mu, log_var, pred_num, recon_pred = model(x, recos, padded_sequences_SR)
+                recon_x, mu, log_var, pred_num, recon_pred, pred_recos = model(x, recos, padded_sequences_SR)
                 recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
                                                                                         recon_pred,
                                                                                         params_CR, 
@@ -398,6 +411,8 @@ class Pipline():
                 embading = np.concatenate((embading, mu.cpu().detach().numpy()), axis=0)
                 preds_log_var = np.concatenate((preds_log_var, log_var.cpu().detach().numpy()), axis=0)
                 preds_num_det = np.concatenate((preds_num_det, pred_num.cpu().detach().numpy()), axis=0)
+                adv = self.adversarial_loss(pred_recos, recos[:, self.config['index_recos']])
+                adv_per_event = adv.mean(dim=tuple(range(1, adv.ndim)))
                 
                 # kl_divergence *= koef_KL
                 # num_det_loss *= koef_DL
@@ -407,6 +422,7 @@ class Pipline():
                     KL_loss_mean.append(kl_divergence.to('cpu').numpy())
                     num_det_loss_mean.append(num_det_loss.to('cpu').numpy())
                     mmd_loss_list.append(mmd_loss.cpu().detach().numpy())
+                    adversarial_loss_mean.append(adv_per_event.cpu().numpy())
                 
                     # Вычисляем общий loss для каждого события
                     if len(recon_params_loss.shape) == 1:
@@ -416,10 +432,13 @@ class Pipline():
                         # recon_params_loss (batch, params), усредняем по params
                         recon_params_loss_mean_per_event = torch.mean(recon_params_loss, dim=1)  # (batch,)
                         total_loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + recon_params_loss_mean_per_event*self.koef_mass + mmd_loss*self.koef_MMD
+                    total_loss = total_loss - self.koef_for_encoder * adv_per_event
                     loss_mean.append(total_loss.to('cpu').numpy())
                 else:
-                    loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + torch.mean(recon_params_loss)*self.koef_mass
+                    adv_mean = adv.mean()
+                    loss = recon_loss + kl_divergence*koef_KL + num_det_loss*koef_DL + torch.mean(recon_params_loss)*self.koef_mass - self.koef_for_encoder * adv_mean
                     loss_mean.append(loss.item())
+                    adversarial_loss_mean.append(adv_mean.item())
                     KL_loss_mean.append(kl_divergence.item())
                     recon_loss_mean.append(recon_loss.to('cpu').item())
                     num_det_loss_mean.append(num_det_loss.item())
@@ -445,10 +464,11 @@ class Pipline():
             KL_loss_mean = np.concatenate(KL_loss_mean) if len(KL_loss_mean) > 0 else np.array([])
             num_det_loss_mean = np.concatenate(num_det_loss_mean) if len(num_det_loss_mean) > 0 else np.array([])
             mmd_loss_list = np.array(mmd_loss_list) if len(mmd_loss_list) > 0 else np.array([])
+            adversarial_loss_mean = np.concatenate(adversarial_loss_mean) if len(adversarial_loss_mean) > 0 else np.array([])
             if return_log_var_and_num_det:
-                return loss_mean, KL_loss_mean, recon_loss_mean, num_det_loss_mean, embading, preds_log_var, preds_num_det, mmd_loss_list
+                return loss_mean, KL_loss_mean, recon_loss_mean, num_det_loss_mean, embading, preds_log_var, preds_num_det, mmd_loss_list, adversarial_loss_mean
             else:
-                return loss_mean, KL_loss_mean, recon_loss_mean, num_det_loss_mean, embading, mmd_loss_list
+                return loss_mean, KL_loss_mean, recon_loss_mean, num_det_loss_mean, embading, mmd_loss_list, adversarial_loss_mean
         # recon_params_loss_mean = torch.concat(recon_params_loss_mean, dim=1).numpy()
         # recon_params_loss_mean = np.array(recon_params_loss_mean)/num_examples
         # loss_final = np.array(loss_mean).mean()
@@ -517,7 +537,7 @@ class Pipline():
                     num_det = Loss.calc_det(x,self.mask,use_mask=False).to('cpu').detach().numpy()
                     num_det_list = np.concatenate((num_det_list, num_det), axis=0)
 
-                    recon_x, mu, log_var, pred_num, recon_pred = model(x, recos, padded_sequences_SR)
+                    recon_x, mu, log_var, pred_num, recon_pred, pred_recos = model(x, recos, padded_sequences_SR)
                     print('shape for SR', padded_sequences_SR.shape, x.shape)
                     recon_loss, kl_divergence, num_det_loss, recon_params_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num,
                                                                                             recon_pred,
@@ -584,7 +604,7 @@ class Pipline():
                 part = torch.where(part == 1, 0, 1).to(device) # 0- photon, 1- proton
                 params_CR = params_CR.to(device)
                 mu, log_var, (h_n, c_n) = model.encoder(x)
-                recon_x, mu, log_var, pred_num, pred_mass = model(x, recos)
+                recon_x, mu, log_var, pred_num, pred_mass, pred_recos = model(x, recos)
                 if not(NoneLoss):
                     # Можно использовать если понадобятся другие лоссы
                     recon_loss, kl_divergence, num_det_loss, mass_loss, mmd_loss = Loss.vae_loss(recon_x, x, mu, log_var, pred_num, pred_mass, params_CR, part,
@@ -637,8 +657,8 @@ if __name__ == "__main__":
     elif args.mode == 'test':
         pipline = Pipline(config, need_train_DS=False)
         print('TEST PIPLINE')
-        save_path = '/home/rfit/Telescope_Array/phd_work/src/train_VAE/Original_VAE_dim_5_norm__ENERGY_IN_LATTENT'
-        pipline.test(model_path='/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Original_VAE_dim_5_norm__ENERGY_IN_LATTENT/last', path_save=save_path)
+        save_path = '/home/rfit/Telescope_Array/phd_work/src/train_VAE/results_for_small/Small_Detecoder_with_Energy_Adverserial_no_encoder'
+        pipline.test(model_path='/home/rfit/Telescope_Array/phd_work/Models/AutoEncoder/Small_Detecoder_with_Energy_Adverserial_no_encoder/last', path_save=save_path)
     elif args.mode == 'latent':
         pipline = Pipline(config, need_train_DS=False)
         print('Latent PIPLINE')

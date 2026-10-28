@@ -825,16 +825,16 @@ class DecoderFullyConnected(nn.Module):
         super().__init__()
         self.output_size = output_size
         self.index_recos = index_recos if index_recos is not None else []
-        self.input_dim = latent_dim + coord_dim + 1 + len(self.index_recos)
+        self.input_dim = latent_dim + coord_dim + len(self.index_recos)
         self.latent_to_detector = nn.Sequential(
             nn.Linear(self.input_dim, 64),
             nn.LeakyReLU(),
             nn.Linear(64, 128),
             nn.LeakyReLU(),
-            nn.Linear(128, 512),
-            nn.LeakyReLU(),
-            nn.Linear(512, 128),
-            nn.LeakyReLU(),
+            # nn.Linear(128, 512),
+            # nn.LeakyReLU(),
+            # nn.Linear(512, 128),
+            # nn.LeakyReLU(),
             nn.Linear(128, 64),
             nn.LeakyReLU(),
             nn.Linear(64, 32),
@@ -847,10 +847,10 @@ class DecoderFullyConnected(nn.Module):
         batch_size = z.size(0)
         # Длина выхода = длина входного тензора (с padding), как у DecoderTransformerSimple (+1 к real_lenght)
         seq_len = x_coordinat.size(1)
-        length_feature = seq_len_real.unsqueeze(1).to(z.dtype)
+        # length_feature = seq_len_real.unsqueeze(1).to(z.dtype)
         detector_outputs = torch.zeros((batch_size, seq_len, self.output_size), device=z.device)
         for i in range(seq_len):
-            input_inforamtion = torch.cat((z, x_coordinat[:, i, :], length_feature), dim=1)
+            input_inforamtion = torch.cat((z, x_coordinat[:, i, :]), dim=1)
             detector_outputs[:, i, :] = self.forvard_one_detector(input_inforamtion)
         return detector_outputs, None, seq_len_real.unsqueeze(1), None
 class DecoderTransformerSimple(nn.Module):
@@ -937,6 +937,40 @@ class DecoderTransformerSimple(nn.Module):
                 mask[i, length_int:] = True
         return mask
 
+class GradReverse(torch.autograd.Function):
+    """Прямой проход — тождество. В энкодер уходит -koef * градиент.
+
+    Из градиента убраны сдвиг среднего и растяжение дисперсии по батчу,
+    поэтому штраф головы не уводит облако z от N(0, I).
+    """
+    @staticmethod
+    def forward(ctx, x, koef):
+        ctx.koef = koef
+        ctx.save_for_backward(x)
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, = ctx.saved_tensors
+        g = grad_output - grad_output.mean(dim=0, keepdim=True)
+        xc = x - x.mean(dim=0, keepdim=True)
+        denom = (xc * xc).sum(dim=0, keepdim=True).clamp_min(1e-6)
+        g = g - xc * (g * xc).sum(dim=0, keepdim=True) / denom
+        return -ctx.koef * g, None
+
+class RecoFromLatent(nn.Module):
+    """Полносвязный блок: латентный вектор z -> recos[:, index_recos]."""
+    def __init__(self, latent_dim: int, n_recos: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(latent_dim, 32),
+            nn.LeakyReLU(),
+            nn.Linear(32, n_recos),
+        )
+
+    def forward(self, z):
+        return self.net(z)
+
 class VAE(nn.Module):
     """
     Вариационный автокодировщик (VAE), основанный на LSTM энкодере и декодере.
@@ -965,8 +999,11 @@ class VAE(nn.Module):
         self.TRANSFORMER = True
         self.reparameterize_koef = reparameterize_koef
         self.padding_value = kwargs.get('padding_value', None)
-        self.index_recos = index_recos
+        self.index_recos = index_recos if index_recos is not None else []
         self.recos_in_latten = recos_in_latten
+        n_recos = len(self.index_recos)
+        self.reco_from_latent = RecoFromLatent(latent_dim, n_recos) if n_recos > 0 else None
+        self.koef_for_encoder = kwargs.get('koef_for_encoder', 0.0)
         if CLS_token == 'trainable':
             self.CLS_token = torch.nn.Parameter(
                                 start_token.unsqueeze(0))
@@ -979,7 +1016,8 @@ class VAE(nn.Module):
             #                                     num_layers=num_layers, **kwargs)
             self.encoder = Encoder_Kharuk_idia(input_dim, hidden_dim, latent_dim,
                                                 num_layers=2,num_base_transformer_layers=2,num_cls_update_layers=2, **kwargs)
-            self.decoder = DecoderFullyConnected(latent_dim, hidden_dim_decoder, input_dim, index_recos=self.index_recos)
+            decoder_recos = self.index_recos if self.recos_in_latten else []
+            self.decoder = DecoderFullyConnected(latent_dim, hidden_dim_decoder, input_dim, index_recos=decoder_recos)
             # self.decoder = DecoderTransformerSimple(latent_dim, hidden_dim_decoder, input_dim,
             #                                         max_len = 100,
             #                                         num_layers=num_layers_decoder)
@@ -1053,6 +1091,7 @@ class VAE(nn.Module):
 
             # Репараметризация для VAE
             z = self.reparameterize(mu, log_var, koef=self.reparameterize_koef)
+            pred_recos = self.reco_from_latent(GradReverse.apply(z, self.koef_for_encoder)) if self.reco_from_latent is not None else None
 
             # ADD RECOS TO LATTEN
             if self.recos_in_latten:
@@ -1065,8 +1104,9 @@ class VAE(nn.Module):
 
             # Репараметризация для VAE
             z = self.reparameterize(mu, log_var, koef=self.reparameterize_koef)
+            pred_recos = self.reco_from_latent(GradReverse.apply(z, self.koef_for_encoder)) if self.reco_from_latent is not None else None
             recon_x, _, num, mass = self.decoder(z, seq_len)
-        return recon_x, mu, log_var, num, mass
+        return recon_x, mu, log_var, num, mass, pred_recos
     @staticmethod
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
