@@ -7,6 +7,8 @@ from torch import nn
 from typing import Optional
 import torch 
 mse = torch.nn.MSELoss(reduction='none')
+def adversarial_loss(pred_recos, real_recos):
+    return nn.MSELoss(reduction='none')(pred_recos, real_recos)
 def gaussian_kernel(x, y, sigma=1):
     #TODO dim=1 надо заметить возможно на dim=0
     x_sq = torch.sum(x**2, dim=1, keepdim=True)
